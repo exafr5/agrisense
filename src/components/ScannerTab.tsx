@@ -6,6 +6,7 @@ import { TRANSLATIONS } from "../utils/translations";
 import DiagnosticChat from "./DiagnosticChat";
 import DiseaseModal from "./DiseaseModal";
 import { PRESET_DISEASES } from "../data/diseases";
+import { simulateClientDiagnosis } from "../utils/clientSimulator";
 
 interface ScannerTabProps {
   onNewDiagnosis: (result: DiagnosisResult) => void;
@@ -44,22 +45,27 @@ export default function ScannerTab({ onNewDiagnosis, offlineMode, language = "en
     setIsDiagnosing(true);
     setErrorMessage(null);
     try {
-      const response = await fetch("/api/diagnose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: imageB64,
-          description: textDescription,
-          offlineSimulated: offlineMode,
-          language
-        })
-      });
+      let data: DiagnosisResult;
+      try {
+        const response = await fetch("/api/diagnose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image: imageB64,
+            description: textDescription,
+            offlineSimulated: offlineMode,
+            language
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error("Diagnosis request failed. Please check network and try again.");
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        data = await response.json();
+      } catch (fetchErr) {
+        console.warn("Backend API not reachable. Using client-side diagnosis fallback:", fetchErr);
+        data = simulateClientDiagnosis(imageB64, textDescription, language);
       }
-
-      const data: DiagnosisResult = await response.json();
       
       // If we uploaded an image, let's attach the previewUrl to the result
       const finalizedResult = {

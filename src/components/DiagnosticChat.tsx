@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Send, Leaf, Sparkles, User, RefreshCw, CheckCircle2, ChevronRight, HelpCircle, History } from "lucide-react";
 import { DiagnosisResult, LanguageCode } from "../types";
 import { TRANSLATIONS } from "../utils/translations";
+import { simulateClientChat } from "../utils/clientSimulator";
 
 interface Message {
   id: string;
@@ -138,21 +139,26 @@ export default function DiagnosticChat({ offlineMode, language = "en", onNewDiag
           content: m.content
         }));
 
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: chatHistory,
-          offlineSimulated: offlineMode,
-          language
-        })
-      });
+      let data;
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: chatHistory,
+            offlineSimulated: offlineMode,
+            language
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to receive real-time answer from agronomist.");
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        data = await response.json();
+      } catch (chatErr) {
+        console.warn("Backend API not reachable. Using client-side chat fallback:", chatErr);
+        data = simulateClientChat(textToSend, language);
       }
-
-      const data = await response.json();
 
       const modelMsg: Message = {
         id: "msg_" + Date.now() + "_reply",
