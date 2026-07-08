@@ -23,6 +23,7 @@ export default function ScannerTab({ onNewDiagnosis, offlineMode, language = "en
   const [diagnosticMode, setDiagnosticMode] = useState<"photo" | "chat">("photo");
   const [showResultModal, setShowResultModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [fallbackSurveyData, setFallbackSurveyData] = useState<{ imageB64: string | null; textDescription: string | null } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,23 +63,41 @@ export default function ScannerTab({ onNewDiagnosis, offlineMode, language = "en
           throw new Error("HTTP " + response.status);
         }
         data = await response.json();
+
+        // If we uploaded an image, let's attach the previewUrl to the result
+        const finalizedResult = {
+          ...data,
+          imageUrl: previewUrl || imageB64 || undefined
+        };
+
+        setActiveDiagnosis(finalizedResult);
+        onNewDiagnosis(finalizedResult);
+        setShowResultModal(true);
+
+        // Reset file selection
+        setSelectedFile(null);
       } catch (fetchErr) {
         console.warn("Backend API not reachable. Using client-side diagnosis fallback:", fetchErr);
-        data = simulateClientDiagnosis(imageB64, textDescription, language);
+        
+        if (!textDescription) {
+          // If there is no manual symptoms description, open the Guided Symptom Selector
+          setFallbackSurveyData({ imageB64, textDescription });
+          setIsDiagnosing(false);
+          return;
+        } else {
+          // Otherwise, match the typed description immediately
+          data = simulateClientDiagnosis(imageB64, textDescription, language);
+          const finalizedResult = {
+            ...data,
+            imageUrl: previewUrl || imageB64 || undefined
+          };
+
+          setActiveDiagnosis(finalizedResult);
+          onNewDiagnosis(finalizedResult);
+          setShowResultModal(true);
+          setSelectedFile(null);
+        }
       }
-      
-      // If we uploaded an image, let's attach the previewUrl to the result
-      const finalizedResult = {
-        ...data,
-        imageUrl: previewUrl || imageB64 || undefined
-      };
-
-      setActiveDiagnosis(finalizedResult);
-      onNewDiagnosis(finalizedResult);
-      setShowResultModal(true);
-
-      // Reset file selection
-      setSelectedFile(null);
     } catch (err: any) {
       console.error(err);
       setErrorMessage(err.message || "An error occurred during diagnostics.");
@@ -448,6 +467,116 @@ export default function ScannerTab({ onNewDiagnosis, offlineMode, language = "en
           disease={activeDiagnosis}
           onClose={() => setShowResultModal(false)}
         />
+      )}
+
+      {/* Interactive Symptom Guided Selector Modal */}
+      {fallbackSurveyData && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fadeIn overflow-y-auto">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-surface-high my-8 text-left"
+          >
+            <div className="flex justify-between items-start gap-4 mb-4">
+              <div>
+                <span className="text-[10px] uppercase font-mono tracking-wider text-highlight bg-highlight/10 px-2.5 py-1 rounded-full mb-1 inline-block font-bold">
+                  Guided Diagnostic Assistant
+                </span>
+                <h3 className="font-serif text-xl sm:text-2xl font-bold text-primary">Local Symptom Matcher</h3>
+              </div>
+              <button 
+                onClick={() => setFallbackSurveyData(null)}
+                className="text-on-surface-variant hover:text-primary transition-colors text-lg font-bold p-1 hover:bg-surface-low rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-on-surface-variant text-xs leading-relaxed mb-6">
+              Since you are running offline or on a static deploy, let's identify the foliage pathogen together! <strong>Please select the visual pattern on your leaf that best matches:</strong>
+            </p>
+
+            <div className="space-y-3">
+              {[
+                {
+                  id: "early_blight",
+                  title: language === "hi" ? "अगेती झुलसा (Early Blight)" : "Early Blight (Target spots)",
+                  desc: language === "hi" 
+                    ? "पुरानी पत्तियों पर छोटे भूरे धब्बे जिनके अंदर गोल-गोल छल्ले बने हों।"
+                    : "Concentric brown rings like target boards on older foliage. Leaves turn yellow and drop.",
+                  keyword: "early blight"
+                },
+                {
+                  id: "late_blight",
+                  title: language === "hi" ? "पछेती झुलसा (Late Blight)" : "Late Blight (Water-soaked patches)",
+                  desc: language === "hi"
+                    ? "पत्तियों पर बड़े अनियमित काले-भूरे धब्बे, नम हवा में नीचे सफेद मखमली कवक।"
+                    : "Large water-soaked dark patches turning black rapidly. Under damp weather, leaves wilt.",
+                  keyword: "late blight"
+                },
+                {
+                  id: "leaf_mold",
+                  title: language === "hi" ? "लीफ मोल्ड (Leaf Mold)" : "Leaf Mold (Velvety mold)",
+                  desc: language === "hi"
+                    ? "ऊपर पीले धब्बे, नीचे जैतून-हरे रंग की रोएंदार परत।"
+                    : "Olive-green, velvety mold mats on the undersides of leaves, with yellowing on top.",
+                  keyword: "leaf mold"
+                },
+                {
+                  id: "bacterial_spot",
+                  title: language === "hi" ? "बैक्टीरियल स्पॉट (Bacterial Spot)" : "Bacterial Spot (Greasy spots)",
+                  desc: language === "hi"
+                    ? "मिर्च या टमाटर की पत्तियों पर छोटे, काले चिकने/तैलीय धब्बे जिनके चारों ओर पीला घेरा हो।"
+                    : "Small greasy circular spots with light yellow halos. Starts on lower foliage.",
+                  keyword: "bacterial spot"
+                },
+                {
+                  id: "healthy",
+                  title: language === "hi" ? "स्वस्थ पत्ती (Healthy Foliage)" : "Healthy Crop (Vibrant Green)",
+                  desc: language === "hi"
+                    ? "पत्तियां पूरी तरह स्वस्थ, चमकदार और हरी हैं। कोई धब्बा या रोग लक्षण नहीं है।"
+                    : "Leaves are vibrant, strong, and completely free from spots, mold, or lesions.",
+                  keyword: "healthy"
+                }
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => {
+                    const data = simulateClientDiagnosis(fallbackSurveyData.imageB64, opt.keyword, language);
+                    const finalizedResult = {
+                      ...data,
+                      imageUrl: previewUrl || fallbackSurveyData.imageB64 || undefined
+                    };
+                    setActiveDiagnosis(finalizedResult);
+                    onNewDiagnosis(finalizedResult);
+                    setShowResultModal(true);
+                    setFallbackSurveyData(null);
+                    setSelectedFile(null);
+                  }}
+                  className="w-full text-left p-4 rounded-2xl border border-surface-high hover:border-primary hover:bg-primary/5 transition-all group flex gap-3 items-start cursor-pointer hover:shadow-sm"
+                >
+                  <span className="w-5 h-5 rounded-full border border-primary/30 flex items-center justify-center text-xs shrink-0 mt-0.5 group-hover:bg-primary group-hover:text-white transition-colors text-primary font-bold">
+                    →
+                  </span>
+                  <div>
+                    <h5 className="font-bold text-sm text-primary group-hover:text-primary-dark transition-colors">{opt.title}</h5>
+                    <p className="text-on-surface-variant text-[11px] leading-relaxed mt-0.5">{opt.desc}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setFallbackSurveyData(null)}
+                className="px-5 py-2.5 rounded-xl border border-surface-high hover:bg-surface-low transition-colors text-xs font-semibold text-on-surface-variant cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );
