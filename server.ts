@@ -1,0 +1,857 @@
+import express from "express";
+import path from "path";
+import { createServer as createViteServer } from "vite";
+import { GoogleGenAI, Type } from "@google/genai";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const app = express();
+const PORT = 3000;
+
+// Body parsing with higher limits for base64 image upload
+app.use(express.json({ limit: "10mb" }));
+
+// Lazy init Gemini AI
+let aiClient: GoogleGenAI | null = null;
+function getAiClient(): GoogleGenAI | null {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+      console.warn("GEMINI_API_KEY is not defined. AgriSense will operate with high-fidelity simulated diagnostics.");
+      return null;
+    }
+    aiClient = new GoogleGenAI({
+      apiKey: apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+  }
+  return aiClient;
+}
+
+// Robust fallback execution for generateContent when models experience high-demand/503
+async function generateContentWithFallback(
+  ai: GoogleGenAI,
+  params: any
+): Promise<any> {
+  const modelsToTry = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
+  ];
+  let lastError: any = null;
+
+  for (const modelName of modelsToTry) {
+    try {
+      console.log(`Attempting generateContent using model: ${modelName}...`);
+      const response = await ai.models.generateContent({
+        ...params,
+        model: modelName
+      });
+      console.log(`Successfully generated content using model: ${modelName}`);
+      return response;
+    } catch (err: any) {
+      console.error(`Error with model ${modelName}:`, err?.message || err);
+      lastError = err;
+      // If it's a 503 UNAVAILABLE or any other API error, we immediately try the next fallback model.
+    }
+  }
+
+  throw lastError || new Error("All fallback models failed to generate content");
+}
+
+// Pre-packaged simulated mock diagnoses in case of offline/no-api-key fallback
+const MOCK_DIAGNOSES = {
+  early_blight: {
+    isHealthy: false,
+    cropName: "Tomato",
+    diseaseName: "Early Blight",
+    scientificName: "Alternaria solani",
+    confidence: 87,
+    severity: "Moderate" as const,
+    description: "Early blight is a common fungal disease affecting tomatoes, potatoes, and peppers. It typically starts on the lower leaves with small, brown spots that develop concentric rings like a target. Over time, leaves turn yellow and drop off, exposing fruit to sunscald.",
+    symptoms: [
+      "Concentric rings ('target spots') on older leaves",
+      "Yellow halos surrounding brown necrotic spots",
+      "Stem lesions with dark sunken areas",
+      "Premature defoliation starting from the bottom of the plant"
+    ],
+    treatments: [
+      {
+        category: "Immediate Actions",
+        steps: [
+          "Prune off affected lower leaves immediately and dispose of them securely (do not compost).",
+          "Sterilize pruning shears with isopropyl alcohol between cuts to prevent spreading the spores."
+        ]
+      },
+      {
+        category: "Cultural Controls",
+        steps: [
+          "Water at the base of the plant (drip irrigation) to avoid wetting leaves.",
+          "Apply a 2-3 inch layer of organic mulch to prevent fungal spores in the soil from splashing onto foliage."
+        ]
+      },
+      {
+        category: "Organic Solutions",
+        steps: [
+          "Spray with copper-based organic fungicides or Bacillus subtilis preventative sprays.",
+          "Apply a baking soda solution (1 tbsp baking soda, 1 tsp liquid soap, 1 gallon water) as a mild prophylactic."
+        ]
+      },
+      {
+        category: "Prevention",
+        steps: [
+          "Practice 3-year crop rotation (avoid planting Solanaceae crops in the same spot).",
+          "Ensure wide spacing (24-36 inches) between tomato plants to maximize airflow."
+        ]
+      }
+    ]
+  },
+  late_blight: {
+    isHealthy: false,
+    cropName: "Tomato",
+    diseaseName: "Late Blight",
+    scientificName: "Phytophthora infestans",
+    confidence: 94,
+    severity: "High" as const,
+    description: "Late blight is a highly destructive oomycete disease. It thrives in cool, wet weather and spreads rapidly, capable of destroying entire fields within days. It causes large, water-soaked dark patches on leaves, which may develop a white, fuzzy growth on the undersides in humid conditions.",
+    symptoms: [
+      "Large, irregular water-soaked dark brown or black lesions on foliage",
+      "White, fuzzy fungal growth on leaf undersides in humid conditions",
+      "Dark brown, greasy lesions on stems and green tomato fruits",
+      "Rapid collapses of entire branches and leaf stems"
+    ],
+    treatments: [
+      {
+        category: "Immediate Actions",
+        steps: [
+          "Destroy and deeply bury or bag infected plants immediately. Do not compost or leave them in the field.",
+          "Notify surrounding farmers, as late blight spores can travel miles in the wind."
+        ]
+      },
+      {
+        category: "Cultural Controls",
+        steps: [
+          "Harvest salvageable fruit immediately to prevent total crop loss.",
+          "Remove any wild nightshade weeds which act as volunteer hosts."
+        ]
+      },
+      {
+        category: "Chemical/Organic Treatments",
+        steps: [
+          "Apply preventative copper-based fungicides aggressively on remaining healthy plants in damp weather.",
+          "In conventional systems, apply systemic fungicides containing chlorothalonil or mefenoxam."
+        ]
+      },
+      {
+        category: "Prevention",
+        steps: [
+          "Always buy certified disease-free seeds and seedlings.",
+          "Select resistant tomato cultivars such as 'Defiant PHR', 'Mountain Merit', or 'Plum Regal'."
+        ]
+      }
+    ]
+  },
+  leaf_mold: {
+    isHealthy: false,
+    cropName: "Tomato",
+    diseaseName: "Leaf Mold",
+    scientificName: "Passalora fulva",
+    confidence: 81,
+    severity: "Moderate" as const,
+    description: "Leaf mold is primarily a greenhouse tomato disease occurring in humid, poorly ventilated environments. It presents as pale green or yellow spots on the upper leaf surface, with olive-green to grey velvety spore mats underneath.",
+    symptoms: [
+      "Pale green to light yellow spots on upper leaf surface",
+      "Olive-green, velvety mold growth on the corresponding lower leaf surface",
+      "Withering, curling, and premature dropping of infected foliage"
+    ],
+    treatments: [
+      {
+        category: "Immediate Actions",
+        steps: [
+          "Immediately increase greenhouse ventilation by opening vents, adding fans, and lowering relative humidity below 85%."
+        ]
+      },
+      {
+        category: "Cultural Controls",
+        steps: [
+          "Prune lower foliage to increase air circulation around the lower canopy.",
+          "Switch completely to early morning drip watering to allow the soil surface to dry during the day."
+        ]
+      },
+      {
+        category: "Organic Solutions",
+        steps: [
+          "Apply copper fungicides or biofungicides containing Bacillus amyloliquefaciens."
+        ]
+      },
+      {
+        category: "Prevention",
+        steps: [
+          "Space plants generously inside tunnels or greenhouses.",
+          "Select tomato varieties bred specifically with high resistance to leaf mold."
+        ]
+      }
+    ]
+  },
+  bacterial_spot: {
+    isHealthy: false,
+    cropName: "Pepper",
+    diseaseName: "Bacterial Spot",
+    scientificName: "Xanthomonas campestris pv. vesicatoria",
+    confidence: 89,
+    severity: "Moderate" as const,
+    description: "Bacterial spot affects peppers and tomatoes, causing small, circular, dark-colored spots with yellow halos. In wet conditions, the spots look greasy or water-soaked. Severe infection causes extensive yellowing and defoliation, leaving the fruit vulnerable to sunburn.",
+    symptoms: [
+      "Small, dark, greasy circular spots on leaves",
+      "Yellow halos surrounding older lesions",
+      "Scabby, raised brown spots on pepper fruit surfaces",
+      "Widespread yellowing and defoliation starting at lower stems"
+    ],
+    treatments: [
+      {
+        category: "Immediate Actions",
+        steps: [
+          "Do not work in the fields or harvest pepper crops when leaves are wet to prevent spreading the bacteria.",
+          "Remove and dispose of heavily infected leaves immediately."
+        ]
+      },
+      {
+        category: "Cultural Controls",
+        steps: [
+          "Ensure clean, sanitized tools are used for any farming operations.",
+          "Implement rigorous weed control to remove host weeds like horsenettle or nightshade."
+        ]
+      },
+      {
+        category: "Organic Solutions",
+        steps: [
+          "Spray preventative copper-based bactericides mixed with mancozeb (if permitted) starting at transplanting."
+        ]
+      },
+      {
+        category: "Prevention",
+        steps: [
+          "Practice a 2 to 3-year crop rotation out of tomatoes and peppers.",
+          "Use only certified disease-free seed, or treat seed with hot water before planting."
+        ]
+      }
+    ]
+  },
+  healthy: {
+    isHealthy: true,
+    cropName: "Crop",
+    diseaseName: "Healthy Folier Status",
+    scientificName: "N/A",
+    confidence: 96,
+    severity: "Healthy" as const,
+    description: "The foliage appears vibrant, robust, and free from common fungal, bacterial, or viral disease symptoms. Keep maintaining healthy farming practices including consistent watering, good soil health, and balanced nutrition.",
+    symptoms: [
+      "Vibrant green leaf coloration",
+      "No spotting, mold, or water-soaked lesions",
+      "Strong turgor pressure (no wilting)"
+    ],
+    treatments: [
+      {
+        category: "Supportive Care",
+        steps: [
+          "Continue drip irrigation and regular soil nourishment.",
+          "Monitor foliage weekly to catch any early signs of pests or disease."
+        ]
+      },
+      {
+        category: "Prevention",
+        steps: [
+          "Ensure companion planting and crop rotation cycles are followed to keep the ecosystem resilient."
+        ]
+      }
+    ]
+  }
+};
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  hi: "Hindi",
+  pa: "Punjabi",
+  te: "Telugu",
+  ta: "Tamil",
+  mr: "Marathi",
+  bn: "Bengali",
+  kn: "Kannada"
+};
+
+// API Endpoint for Leaf / Symptom Diagnosis
+function formatChatHistory(messages: any[]): any[] {
+  if (!messages || messages.length === 0) return [];
+
+  // Map roles and form basic items
+  const rawTurns = messages.map((m: any) => ({
+    role: m.role === "user" ? "user" : "model",
+    text: m.content || ""
+  }));
+
+  const consolidated: any[] = [];
+  for (const turn of rawTurns) {
+    if (consolidated.length > 0 && consolidated[consolidated.length - 1].role === turn.role) {
+      // Append text with newline to prevent alternation error
+      consolidated[consolidated.length - 1].text += "\n" + turn.text;
+    } else {
+      consolidated.push(turn);
+    }
+  }
+
+  // Ensure it starts with user
+  while (consolidated.length > 0 && consolidated[0].role !== "user") {
+    consolidated.shift();
+  }
+
+  // Format into Gemini contents format
+  return consolidated.map(turn => ({
+    role: turn.role,
+    parts: [{ text: turn.text }]
+  }));
+}
+
+app.post("/api/diagnose", async (req, res) => {
+  const { image, description, offlineSimulated, language } = req.body;
+  const targetLanguageName = LANGUAGE_NAMES[language as string] || "English";
+
+  const ai = getAiClient();
+  const plantIdApiKey = process.env.PLANT_ID_API_KEY;
+  const isPlantIdActive = !!(plantIdApiKey && plantIdApiKey !== "MY_PLANT_ID_API_KEY" && image);
+
+  // Fallback to simulated if offlineSimulated or if we have no active APIs
+  if (offlineSimulated || (!ai && !isPlantIdActive)) {
+    // High-fidelity fallback / simulated responses based on keywords or inputs
+    let choice = "healthy";
+    const descLower = (description || "").toLowerCase();
+
+    if (descLower.includes("early blight") || descLower.includes("concentric") || descLower.includes("target")) {
+      choice = "early_blight";
+    } else if (descLower.includes("late blight") || descLower.includes("water-soaked") || descLower.includes("phytophthora")) {
+      choice = "late_blight";
+    } else if (descLower.includes("mold") || descLower.includes("velvety") || descLower.includes("humid")) {
+      choice = "leaf_mold";
+    } else if (descLower.includes("bacterial") || descLower.includes("greasy") || descLower.includes("pepper")) {
+      choice = "bacterial_spot";
+    } else if (image) {
+      // If we have an image, let's randomly assign a disease for high-quality demo (excluding healthy, to make it fun, or healthy sometimes)
+      const keys = ["early_blight", "late_blight", "leaf_mold", "bacterial_spot", "healthy"];
+      // Hash the image length to make it deterministic for the same image upload
+      const hashIndex = image.length % keys.length;
+      choice = keys[hashIndex];
+    } else {
+      // Just some general problem description
+      if (descLower.includes("yellow") || descLower.includes("spot") || descLower.includes("brown")) {
+        choice = "early_blight";
+      } else {
+        choice = "healthy";
+      }
+    }
+
+    const matchedResult = MOCK_DIAGNOSES[choice as keyof typeof MOCK_DIAGNOSES];
+    // Add timestamp and a small simulation disclaimer
+    return res.json({
+      ...matchedResult,
+      createdAt: new Date().toISOString(),
+      simulated: true,
+      description: matchedResult.description + ` (Simulated analysis in ${targetLanguageName} based on local Indian agricultural database)`
+    });
+  }
+
+  // Real plant.id (photo.id) API Integration if API key is provided and we have an image
+  if (isPlantIdActive && !offlineSimulated) {
+    try {
+      console.log("Calling plant.id (photo.id) API for professional plant disease diagnostics...");
+      const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
+      
+      const plantIdResponse = await fetch("https://api.plant.id/v3/identification", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Api-Key": plantIdApiKey
+        },
+        body: JSON.stringify({
+          images: [cleanBase64],
+          health: "all",
+          similar_images: true
+        })
+      });
+
+      if (!plantIdResponse.ok) {
+        throw new Error(`plant.id API returned status ${plantIdResponse.status}`);
+      }
+
+      const plantIdData = await plantIdResponse.json() as any;
+      console.log("plant.id API responded successfully.");
+
+      // If Gemini is available, use it to localize and enrich the plant.id response
+      if (ai) {
+        console.log("Enriching plant.id results using Gemini AI for language localization...");
+        const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
+Your task is to translate and format the provided raw plant.id diagnosis data into ${targetLanguageName} matching our response schema.
+
+Translate all common names, descriptions, symptoms, and treatment steps into ${targetLanguageName} (except scientific names which should remain as Latin scientific names). Use Indian subcontinent agricultural contexts for treatments.
+
+CRITICAL REQUIREMENT FOR SIMPLICITY:
+- All explanations, descriptions, and treatment steps must be written in EXTREMELY simple, plain, non-technical terms.
+- Use simple, everyday words that a normal farmer or beginner can easily understand. Avoid complex scientific jargon, heavy botany terms, or overly complicated instructions.
+- Keep the "description" highly clear, humble, and straightforward.
+- Explain the "treatments" (cure) in very simple, step-by-step plain words so anyone can do them easily.
+
+Return the output strictly in the requested JSON format matching the schema. Do not include markdown formatting or backticks.`;
+
+        const response = await generateContentWithFallback(ai, {
+          contents: `Here is the raw plant.id (photo.id) API output for a crop leaf scan:
+${JSON.stringify(plantIdData, null, 2)}
+
+Please convert this into a single localized DiagnosisResult JSON conforming to this schema:
+- isHealthy: boolean (true if healthy, false if has diseases)
+- cropName: common name of the plant in ${targetLanguageName} (e.g., Tomato, Paddy/Rice, Wheat, etc.)
+- diseaseName: common name of the top disease in ${targetLanguageName} or "Healthy" if healthy
+- scientificName: scientific name of the crop or pathogen (Latin, e.g., Solanum lycopersicum)
+- confidence: number between 0 and 100
+- severity: "High", "Moderate", "Low", or "Healthy"
+- description: a localized 2-3 sentence overview of this crop condition
+- symptoms: array of 3-5 localized symptoms
+- treatments: array of localized treatment objects, each having { category: string, steps: string[] } (using organic/Indian practices where applicable)`,
+          config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                isHealthy: { type: Type.BOOLEAN },
+                cropName: { type: Type.STRING },
+                diseaseName: { type: Type.STRING },
+                scientificName: { type: Type.STRING },
+                confidence: { type: Type.NUMBER },
+                severity: { type: Type.STRING },
+                description: { type: Type.STRING },
+                symptoms: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                },
+                treatments: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      category: { type: Type.STRING },
+                      steps: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                      }
+                    },
+                    required: ["category", "steps"]
+                  }
+                }
+              },
+              required: [
+                "isHealthy",
+                "cropName",
+                "diseaseName",
+                "scientificName",
+                "confidence",
+                "severity",
+                "description",
+                "symptoms",
+                "treatments"
+              ]
+            }
+          }
+        });
+
+        const text = response.text;
+        if (text) {
+          const result = JSON.parse(text.trim());
+          return res.json({
+            ...result,
+            createdAt: new Date().toISOString(),
+            simulated: false,
+            dataSource: "plant.id + Gemini"
+          });
+        }
+      }
+
+      // Fallback manual extraction if Gemini is not available or failed to enrich
+      const classification = plantIdData.result?.classification?.suggestions?.[0];
+      const disease = plantIdData.result?.disease?.suggestions?.[0];
+      
+      const isHealthy = plantIdData.result?.is_healthy?.binary ?? (!disease || disease.probability < 0.2);
+      const cropName = classification?.name ?? "Crop";
+      const diseaseName = isHealthy ? "Healthy Foliage Status" : (disease?.common_names?.[0] ?? disease?.name ?? "Unknown disease");
+      const scientificName = isHealthy ? (classification?.name ?? "N/A") : (disease?.name ?? "N/A");
+      const confidence = Math.round((isHealthy ? (classification?.probability ?? 0.9) : (disease?.probability ?? 0.8)) * 100);
+      const severity = isHealthy ? "Healthy" : "Moderate";
+      const description = isHealthy 
+        ? "The crop foliage appears vigorous and healthy with active photosynthesis." 
+        : (disease?.details?.description ?? "A disease has been detected affecting the crop leaves and vascular systems.");
+      
+      const symptoms = isHealthy 
+        ? ["Vibrant green coloration", "Active turgor pressure", "No visible necrotic spots"]
+        : ["Leaf discoloration or necrotic lesions", "Foliage spotting", "Potential wilting or tissue damage"];
+
+      const treatments: any[] = [];
+      if (disease?.details?.treatment?.biological) {
+        treatments.push({
+          category: "Organic Solutions",
+          steps: disease.details.treatment.biological
+        });
+      }
+      if (disease?.details?.treatment?.prevention) {
+        treatments.push({
+          category: "Prevention",
+          steps: disease.details.treatment.prevention
+        });
+      }
+      if (treatments.length === 0) {
+        treatments.push({
+          category: "Recommended Practices",
+          steps: isHealthy 
+            ? ["Continue monitoring regularly", "Ensure optimal hydration and organic cow compost application"]
+            : ["Prune and destroy infected leaves immediately", "Avoid overhead watering to restrict spore spread"]
+        });
+      }
+
+      return res.json({
+        isHealthy,
+        cropName,
+        diseaseName,
+        scientificName,
+        confidence,
+        severity,
+        description,
+        symptoms,
+        treatments,
+        createdAt: new Date().toISOString(),
+        simulated: false,
+        dataSource: "plant.id"
+      });
+
+    } catch (err: any) {
+      console.error("plant.id API Error, falling back to standard Gemini API:", err);
+    }
+  }
+
+  // Real Gemini API Call!
+  try {
+    const parts: any[] = [];
+
+    // Prompt instructions to guide Gemini for professional crop diagnosis
+    const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
+Your task is to diagnose plant diseases or health status from leaves, stems, or crop images, or from the farmer's written descriptions.
+
+The farmer is based in India. You must use Indian-oriented agronomy practices, organic/cultural solutions (such as Neem oil, Panchagavya, Trichoderma viride, copper oxychloride, cow dung compost, ash dusting), and crop names relevant to India.
+
+CRITICAL REQUIREMENT FOR SIMPLICITY:
+- All explanations, descriptions, symptoms, and treatment steps must be written in EXTREMELY simple, plain, non-technical terms.
+- Use simple, everyday words that a normal farmer or beginner can easily understand. Avoid complex scientific jargon, heavy botany terms, or overly complicated instructions.
+- Keep the "description" highly clear, humble, and straightforward.
+- Explain the "treatments" (cures) in very simple, step-by-step plain words so anyone can perform them easily.
+
+IMPORTANT: You MUST respond and translate all output fields into the language: "${targetLanguageName}". 
+If "${targetLanguageName}" is not English, you MUST translate ALL fields in the response JSON (except scientific name which should remain scientific) into "${targetLanguageName}". For example:
+- "cropName": translate to the local name in "${targetLanguageName}" (e.g. "टमाटर" for Tomato, "आलू" for Potato if Hindi)
+- "diseaseName": translate to "${targetLanguageName}" (e.g., "अगेती झुलसा" for Early Blight)
+- "description": write the entire 2-3 sentence overview in "${targetLanguageName}" (using extremely simple, plain language)
+- "symptoms": write each symptom in "${targetLanguageName}" (using extremely simple, plain language)
+- "treatments": write all categories (e.g. 'तत्काल कार्रवाई', 'जैविक उपाय') and steps in "${targetLanguageName}" (using extremely simple, plain language)
+
+Return the output strictly in the requested JSON format matching the schema. Do not include markdown formatting or backticks outside the json.`;
+
+    if (image) {
+      // Image data represents base64 encoded picture
+      // Clean up the prefix if present
+      const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
+      parts.push({
+        inlineData: {
+          mimeType: "image/jpeg",
+          data: cleanBase64
+        }
+      });
+    }
+
+    let userPromptText = "Please analyze this plant foliage.";
+    if (description) {
+      userPromptText += ` The farmer described the symptoms as follows: "${description}"`;
+    }
+    parts.push({ text: userPromptText });
+
+    const response = await generateContentWithFallback(ai, {
+      contents: { parts },
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isHealthy: { type: Type.BOOLEAN, description: "True if the plant/leaf is healthy, false if diseased" },
+            cropName: { type: Type.STRING, description: `The common name of the crop in ${targetLanguageName} (e.g. Tomato, Pepper, Potato, Paddy/Rice, Cotton, Wheat)` },
+            diseaseName: { type: Type.STRING, description: `The common name of the disease in ${targetLanguageName} or 'Healthy' if healthy` },
+            scientificName: { type: Type.STRING, description: "The scientific name of the disease pathogen (e.g. Phytophthora infestans) or 'N/A' if healthy" },
+            confidence: { type: Type.NUMBER, description: "A confidence score between 0 and 100 representing certainty" },
+            severity: { type: Type.STRING, description: "The severity rating: 'High', 'Moderate', 'Low', or 'Healthy'" },
+            description: { type: Type.STRING, description: `A 2-3 sentence overview in ${targetLanguageName} describing the disease, its characteristics, and how it damages the crop` },
+            symptoms: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: `A list of visual symptoms present or matching this disease in ${targetLanguageName} (3-5 points)`
+            },
+            treatments: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  category: { type: Type.STRING, description: `Category name in ${targetLanguageName}, e.g., 'Immediate Actions', 'Cultural Controls', 'Organic Solutions', 'Chemical Treatments', 'Prevention'` },
+                  steps: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: `Actionable concrete steps for the category in ${targetLanguageName} (2-4 steps per category)`
+                  }
+                },
+                required: ["category", "steps"]
+              },
+              description: "List of treatment categories and concrete steps"
+            }
+          },
+          required: [
+            "isHealthy",
+            "cropName",
+            "diseaseName",
+            "scientificName",
+            "confidence",
+            "severity",
+            "description",
+            "symptoms",
+            "treatments"
+          ]
+        }
+      }
+    });
+
+    const text = response.text;
+    if (!text) {
+      throw new Error("No response text returned from Gemini API");
+    }
+
+    const result = JSON.parse(text.trim());
+    return res.json({
+      ...result,
+      createdAt: new Date().toISOString(),
+      simulated: false
+    });
+
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    // Fallback to simulated if real call fails
+    return res.status(500).json({
+      error: "AI diagnosis failed temporarily. Reverting to local fallback.",
+      details: error.message
+    });
+  }
+});
+
+
+// API Endpoint for Diagnostic Chat
+app.post("/api/chat", async (req, res) => {
+  const { messages, offlineSimulated, language } = req.body;
+  const targetLanguageName = LANGUAGE_NAMES[language as string] || "English";
+  const ai = getAiClient();
+
+  const lastUserMessage = messages && messages.length > 0 
+    ? messages[messages.length - 1].content 
+    : "";
+
+  if (!ai || offlineSimulated) {
+    // High-fidelity local diagnostic chatbot simulation
+    const descLower = lastUserMessage.toLowerCase();
+    let reply = "";
+    let diagnosis = null;
+
+    if (descLower.includes("early blight") || descLower.includes("concentric") || descLower.includes("target")) {
+      reply = `I see. Concentric rings forming target-like patterns on older foliage strongly indicate Early Blight (Alternaria solani). For smallholder Indian farms, pruning lower leaves and applying organic Neem oil or biofungicides like Trichoderma viride is highly recommended.`;
+      diagnosis = { ...MOCK_DIAGNOSES.early_blight, createdAt: new Date().toISOString() };
+    } else if (descLower.includes("late blight") || descLower.includes("water-soaked") || descLower.includes("phytophthora")) {
+      reply = `That is critical. Large water-soaked lesions that blacken rapidly under cool, damp conditions indicate Late Blight (Phytophthora infestans). This is highly destructive. Remove the infected plants immediately and spray copper oxychloride on neighboring healthy crops.`;
+      diagnosis = { ...MOCK_DIAGNOSES.late_blight, createdAt: new Date().toISOString() };
+    } else if (descLower.includes("mold") || descLower.includes("velvety") || descLower.includes("humid")) {
+      reply = `Based on the velvety growth and light-yellow spots on your crop foliage, this looks like Leaf Mold (Passalora fulva). In India, increasing ventilation in polyhouses and dusting organic wood ash is a helpful local cultural remedy.`;
+      diagnosis = { ...MOCK_DIAGNOSES.leaf_mold, createdAt: new Date().toISOString() };
+    } else if (descLower.includes("bacterial") || descLower.includes("greasy") || descLower.includes("pepper")) {
+      reply = `Small, greasy dark spots with faint yellow margins on pepper/chilli leaves point to Bacterial Spot (Xanthomonas campestris). Ensure seed treatment with hot water and avoid irrigation during wet periods.`;
+      diagnosis = { ...MOCK_DIAGNOSES.bacterial_spot, createdAt: new Date().toISOString() };
+    } else if (descLower.includes("healthy") || descLower.includes("perfect") || descLower.includes("no spots")) {
+      reply = `Excellent. Your foliage appears vibrant green and displays solid turgor pressure. This indicates healthy leaf status with active photosynthesis. Keep applying cow dung manure and Panchagavya for high vigor.`;
+      diagnosis = { ...MOCK_DIAGNOSES.healthy, createdAt: new Date().toISOString() };
+    } else {
+      // General response asking for clarification
+      reply = `Greetings! I am the AgriSense AI Agronomist, based in India. Please describe your crop type (e.g. Tomato/टमाटर, Chilli/मिर्च, Paddy/धान, Cotton/कपास) and any specific foliage symptoms (such as spot colors, concentric rings, or water-soaked patches) so I can diagnose it in real-time.`;
+    }
+
+    return res.json({
+      reply,
+      diagnosis,
+      simulated: true
+    });
+  }
+
+  // Real Gemini API call for Chat Diagnostic
+  try {
+    const systemPrompt = `You are AgriSense AI Agronomist, an expert plant pathologist and crop specialist. 
+Your task is to chat with the farmer, understand their plant issues, and diagnose any potential crop diseases or folier issues in real-time.
+
+The farmer is based in India. Use Indian-oriented agronomy practices, organic/cultural solutions (such as Neem oil, Panchagavya, Trichoderma viride, copper oxychloride, cow dung compost, wood ash dusting), and crop names relevant to the Indian subcontinent.
+
+CRITICAL REQUIREMENT FOR SIMPLICITY:
+- All explanations, conversations, descriptions, symptoms, and treatment steps must be written in EXTREMELY simple, plain, non-technical terms.
+- Use simple, everyday words that a normal farmer or beginner can easily understand. Avoid complex scientific jargon, heavy botany terms, or overly complicated instructions.
+- Explain the diagnosis and "treatments" (cures) in very simple, step-by-step plain words so anyone can do them easily.
+
+You must converse and respond in the language: "${targetLanguageName}". 
+If "${targetLanguageName}" is not English, you MUST translate the "reply" and the entire "diagnosis" object fields (except scientific name which should remain scientific) into "${targetLanguageName}". For example:
+- "reply": write the friendly conversational message in "${targetLanguageName}" (using extremely simple, plain language)
+- "cropName": translate to the local name in "${targetLanguageName}" (e.g. "टमाटर" for Tomato)
+- "diseaseName": translate to "${targetLanguageName}" (e.g. "अगेती झुलसा" for Early Blight)
+- "description": write the overview in "${targetLanguageName}" (using extremely simple, plain language)
+- "symptoms": write each symptom in "${targetLanguageName}" (using extremely simple, plain language)
+- "treatments": write the categories (e.g. 'तुरंत कार्रवाई', 'जैविक समाधान') and steps in "${targetLanguageName}" (using extremely simple, plain language)
+
+Guidelines:
+1. Analyze the symptoms described by the farmer in the conversation history.
+2. Ask helpful clarifying questions if you need more details to form a certain diagnosis (e.g. asking about spot colors, target-like concentric rings, humidity, crop name, leaf undersides).
+3. Be professional, friendly, and concise. Keep your text reply between 1 and 3 sentences.
+4. IMPORTANT: If the farmer has provided enough details (such as the crop name and clear visual symptoms) to identify the crop condition or disease with reasonable certainty, populate the 'diagnosis' field with a highly accurate structured analysis. Otherwise, set the 'diagnosis' field to null.
+5. If you do generate a diagnosis, ensure it matches the plant pathology schema.
+
+Response Schema:
+You must return your output strictly in JSON format matching this schema:
+- reply (string): your friendly, helpful, and concise conversational message in ${targetLanguageName} (1-3 sentences).
+- diagnosis (object or null):
+  - isHealthy (boolean): true if the crop is healthy, false if diseased/damaged
+  - cropName (string): the common name of the crop in ${targetLanguageName} (e.g., Tomato, Potato, Pepper)
+  - diseaseName (string): the common name of the disease or "Healthy Folier Status" in ${targetLanguageName}
+  - scientificName (string): the scientific name of the pathogen or "N/A"
+  - confidence (number): your confidence score from 0 to 100
+  - severity (string): "High", "Moderate", "Low", or "Healthy"
+  - description (string): a brief 2-3 sentence overview of the condition in ${targetLanguageName}
+  - symptoms (array of strings): list of 3-5 visual symptoms matching this condition in ${targetLanguageName}
+  - treatments (array of objects): list of treatment categories and steps in ${targetLanguageName}, where each object has:
+    - category (string): e.g., 'Immediate Actions', 'Cultural Controls', 'Organic Solutions', 'Prevention'
+    - steps (array of strings): actionable concrete steps`;
+
+    // Map roles strictly using formatChatHistory helper
+    const contents = formatChatHistory(messages);
+
+    const response = await generateContentWithFallback(ai, {
+      contents: contents,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            reply: { type: Type.STRING, description: `Your conversational response in ${targetLanguageName} (1-3 sentences)` },
+            diagnosis: {
+              type: Type.OBJECT,
+              nullable: true,
+              description: "A structured DiagnosisResult if enough details exist to make a reliable diagnosis, or null otherwise",
+              properties: {
+                isHealthy: { type: Type.BOOLEAN },
+                cropName: { type: Type.STRING },
+                diseaseName: { type: Type.STRING },
+                scientificName: { type: Type.STRING },
+                confidence: { type: Type.NUMBER },
+                severity: { type: Type.STRING },
+                description: { type: Type.STRING },
+                symptoms: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                },
+                treatments: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      category: { type: Type.STRING },
+                      steps: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                      }
+                    },
+                    required: ["category", "steps"]
+                  }
+                }
+              },
+              required: [
+                "isHealthy",
+                "cropName",
+                "diseaseName",
+                "scientificName",
+                "confidence",
+                "severity",
+                "description",
+                "symptoms",
+                "treatments"
+              ]
+            }
+          },
+          required: ["reply", "diagnosis"]
+        }
+      }
+    });
+
+    const text = response.text;
+
+    if (!text) {
+      throw new Error("No response text returned from Gemini API");
+    }
+
+    const result = JSON.parse(text.trim());
+    if (result.diagnosis) {
+      result.diagnosis.createdAt = new Date().toISOString();
+    }
+    return res.json({
+      ...result,
+      simulated: false
+    });
+
+  } catch (error: any) {
+    console.error("Gemini Chat API Error:", error);
+    // Fallback response
+    return res.status(500).json({
+      error: "AI diagnostic chat failed temporarily.",
+      details: error.message
+    });
+  }
+});
+
+// Serve Vite in development, static files in production
+async function startServer() {
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`AgriSense server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

@@ -1,0 +1,81 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,600;0,8..60,700;1,8..60,600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #2F5233;
+  --color-primary-dark: #1E3521;
+  --color-primary-light: #436F48;
+  --color-primary-fixed: #c4edc3;
+  --color-primary-container: #2F5233;
+  
+  --color-highlight: #E8A33D;
+  --color-accent-orange: #feb64e;
+  --color-accent-brown: #835400;
+  
+  --color-background: #f7faf2;
+  --color-surface: #ffffff;
+  --color-surface-low: #f2f5ed;
+  --color-surface-high: #e6e9e1;
+  --color-surface-highest: #e0e4dc;
+  
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --animate-scan: scan 3s ease-in-out infinite;
+  --animate-float: float 3s ease-in-out infinite;
+}
+
+@keyframes scan {
+  0%, 100% {
+    top: 0%;
+  }
+  50% {
+    top: 100%;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f7faf2;
+}
+::-webkit-scrollbar-thumb {
+  background: #c2c8be;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a9d1a8;
+}
+
+/* Custom visual utilities */
+.scan-line {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(to bottom, transparent, #E8A33D, transparent);
+  box-shadow: 0 0 12px #E8A33D, 0 0 4px #E8A33D;
+}
+
+.high-contrast-mode {
+  --color-primary: #000000;
+  --color-primary-dark: #000000;
+  --color-primary-light: #111111;
+  --color-highlight: #ffae00;
+  --color-background: #ffffff;
+  --color-surface-low: #eeeeee;
+  --color-surface-high: #dddddd;
+}
