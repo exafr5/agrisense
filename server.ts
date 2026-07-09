@@ -956,7 +956,7 @@ Return the output strictly in the requested JSON format matching the schema. Do 
       throw new Error("No response text returned from Gemini API");
     }
 
-    const result = JSON.parse(text.trim());
+    const result = JSON.parse(cleanJsonText(text));
     return res.json({
       ...result,
       createdAt: new Date().toISOString(),
@@ -1152,7 +1152,7 @@ You must return your output strictly in JSON format matching this schema:
       throw new Error("No response text returned from Gemini API");
     }
 
-    const result = JSON.parse(text.trim());
+    const result = JSON.parse(cleanJsonText(text));
     if (result.diagnosis) {
       result.diagnosis.createdAt = new Date().toISOString();
     }

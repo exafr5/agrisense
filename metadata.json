@@ -1,6 +1,6 @@
 {
   "name": "AgriSense",
   "description": "Grounded in Science: an expert computer-vision leaf pathology scanner, symptom profile analyzer, and crop treatment index, optimized for offline field operations.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
