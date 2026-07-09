@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { LibraryDisease, DiagnosisResult } from "../types";
 import { 
   X, 
@@ -12,7 +12,11 @@ import {
   CheckCircle2, 
   BookOpen, 
   Activity, 
-  HelpCircle 
+  HelpCircle,
+  Volume2,
+  VolumeX,
+  Languages,
+  Loader2
 } from "lucide-react";
 
 interface DiseaseModalProps {
@@ -22,10 +26,23 @@ interface DiseaseModalProps {
 
 export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
   const [resultMode, setResultMode] = useState<"simple" | "detailed">("simple");
+  const [activeDisease, setActiveDisease] = useState<LibraryDisease | DiagnosisResult>(disease);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [isHindi, setIsHindi] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
-  const isHealthyResult = 'isHealthy' in disease ? disease.isHealthy : false;
-  const severityValue = disease.severity;
-  const displayName = 'diseaseName' in disease ? disease.diseaseName : disease.name;
+  // Clean up any speaking voice when closing
+  useEffect(() => {
+    return () => {
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const isHealthyResult = 'isHealthy' in activeDisease ? activeDisease.isHealthy : false;
+  const severityValue = activeDisease.severity;
+  const displayName = 'diseaseName' in activeDisease ? activeDisease.diseaseName : activeDisease.name;
 
   // Severity color mapping
   const severityColors = {
@@ -38,19 +55,134 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
   const currentSeverityColor = severityColors[severityValue] || "bg-gray-50 text-gray-700 border-gray-200";
 
   // Filter treatments for simple mode (prioritize Immediate Actions and Organic / Natural solutions)
-  const simpleTreatments = disease.treatments.filter(t => 
+  const simpleTreatments = activeDisease.treatments.filter(t => 
     t.category.toLowerCase().includes("immediate") || 
     t.category.toLowerCase().includes("organic") || 
     t.category.toLowerCase().includes("natural") ||
     t.category.toLowerCase().includes("solution") ||
     t.category.toLowerCase().includes("practice") ||
-    t.category.toLowerCase().includes("prevention")
+    t.category.toLowerCase().includes("prevention") ||
+    t.category.includes("कार्रवाई") ||
+    t.category.includes("समाधान") ||
+    t.category.includes("नियंत्रण") ||
+    t.category.includes("बचाव")
   );
 
   // If no simple categories match, use all of them
   const treatmentsToDisplay = resultMode === "simple" && simpleTreatments.length > 0 
     ? simpleTreatments 
-    : disease.treatments;
+    : activeDisease.treatments;
+
+  // Speak Up handler
+  const handleSpeakUp = () => {
+    if (!window.speechSynthesis) {
+      alert("Speech synthesis is not supported in this browser.");
+      return;
+    }
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
+    // Cancel any ongoing speech first
+    window.speechSynthesis.cancel();
+
+    const cropName = 'cropName' in activeDisease ? activeDisease.cropName : activeDisease.crop;
+    const voiceLang = isHindi ? "hi-IN" : "en-IN";
+
+    let speechText = "";
+    if (isHindi) {
+      speechText = `बीमारी का नाम: ${displayName}. फसल का प्रकार: ${cropName}. विवरण: ${activeDisease.description}. `;
+      if (activeDisease.symptoms.length > 0) {
+        speechText += `प्रमुख लक्षण इस प्रकार हैं: ${activeDisease.symptoms.join(". ")}. `;
+      }
+      speechText += `उपचार के तरीके इस प्रकार हैं: `;
+      activeDisease.treatments.forEach(t => {
+        speechText += `${t.category}: ${t.steps.join(". ")}. `;
+      });
+    } else {
+      speechText = `Disease: ${displayName}. Crop: ${cropName}. Description: ${activeDisease.description}. `;
+      if (activeDisease.symptoms.length > 0) {
+        speechText += `The main symptoms are: ${activeDisease.symptoms.join(". ")}. `;
+      }
+      speechText += `The recommended treatment steps are: `;
+      activeDisease.treatments.forEach(t => {
+        speechText += `${t.category}: ${t.steps.join(". ")}. `;
+      });
+    }
+
+    // Clean up any markdown syntax
+    const cleanSpeechText = speechText.replace(/[*#_`~]/g, "").trim();
+
+    const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
+    utterance.lang = voiceLang;
+
+    // Try to get a high quality matching voice
+    const voices = window.speechSynthesis.getVoices();
+    const matchedVoice = voices.find(v => v.lang.startsWith(isHindi ? "hi" : "en"));
+    if (matchedVoice) {
+      utterance.voice = matchedVoice;
+    }
+
+    utterance.rate = 0.85; // slightly slower for better comprehensibility for farmers
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+    };
+
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  };
+
+  // Toggle dynamic Hindi translation
+  const handleTranslateToggle = async () => {
+    if (isHindi) {
+      // Revert to original English / system default
+      setActiveDisease(disease);
+      setIsHindi(false);
+      if (isSpeaking && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+      }
+      return;
+    }
+
+    setIsTranslating(true);
+    if (isSpeaking && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+
+    try {
+      const response = await fetch("/api/translate-diagnosis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          diagnosis: disease,
+          targetLanguage: "hi"
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Translation request failed");
+      }
+
+      const data = await response.json();
+      setActiveDisease(data);
+      setIsHindi(true);
+    } catch (err) {
+      console.error("Translation failed:", err);
+      alert("Unable to complete translation at this moment. Please check your internet connection.");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
@@ -60,9 +192,9 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
       >
         {/* Header Photo or Placeholder */}
         <div className="relative h-48 sm:h-60 overflow-hidden bg-primary-dark shrink-0">
-          {disease.imageUrl ? (
+          {activeDisease.imageUrl ? (
             <img 
-              src={disease.imageUrl} 
+              src={activeDisease.imageUrl} 
               alt={displayName} 
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
@@ -92,17 +224,17 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
               <span className={`text-[10px] font-mono tracking-wider uppercase px-2 py-0.5 rounded-full border ${currentSeverityColor}`}>
                 {severityValue} Severity
               </span>
-              {resultMode === "detailed" && 'confidence' in disease && (
+              {resultMode === "detailed" && 'confidence' in activeDisease && (
                 <span className="text-[10px] bg-primary/80 border border-primary-light font-mono px-2 py-0.5 rounded-full flex items-center gap-1 text-primary-fixed">
                   <Sparkles size={10} />
-                  {(disease as any).confidence}% Match Confidence
+                  {(activeDisease as any).confidence}% Match Confidence
                 </span>
               )}
             </div>
             <h3 className="font-serif text-2xl sm:text-3xl font-bold leading-tight">{displayName}</h3>
-            {resultMode === "detailed" && disease.scientificName && disease.scientificName !== "N/A" && (
+            {resultMode === "detailed" && activeDisease.scientificName && activeDisease.scientificName !== "N/A" && (
               <p className="font-mono text-xs italic text-emerald-300 tracking-wide mt-1 flex items-center gap-1">
-                <Activity size={12} /> Scientific Pathogen: {disease.scientificName}
+                <Activity size={12} /> Scientific Pathogen: {activeDisease.scientificName}
               </p>
             )}
           </div>
@@ -110,10 +242,42 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
 
         {/* Mode Selector Tab Bar */}
         <div className="bg-surface-low border-b border-surface-high/65 px-6 py-3 flex items-center justify-between shrink-0 gap-4 flex-wrap">
-          <div className="text-xs font-semibold text-on-surface-variant flex items-center gap-1.5">
-            <BookOpen size={14} className="text-primary" />
-            Display Configuration:
+          {/* Audio & Translation Actions */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Speak Up Button */}
+            <button
+              id="btn-speak-up"
+              onClick={handleSpeakUp}
+              className={`py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm border cursor-pointer ${
+                isSpeaking 
+                  ? "bg-amber-500 text-white border-amber-500 animate-pulse" 
+                  : "bg-white text-primary border-surface-high hover:bg-gray-50 hover:border-primary-light"
+              }`}
+            >
+              {isSpeaking ? <VolumeX size={14} className="animate-bounce" /> : <Volume2 size={14} />}
+              {isSpeaking ? "Stop Voice (आवाज़ रोकें)" : "Speak Up (बोलें)"}
+            </button>
+
+            {/* Translate Button */}
+            <button
+              id="btn-translate-hindi"
+              onClick={handleTranslateToggle}
+              disabled={isTranslating}
+              className={`py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm border cursor-pointer disabled:opacity-75 ${
+                isHindi 
+                  ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700" 
+                  : "bg-white text-primary border-surface-high hover:bg-gray-50 hover:border-primary-light"
+              }`}
+            >
+              {isTranslating ? (
+                <Loader2 size={14} className="animate-spin text-primary" />
+              ) : (
+                <Languages size={14} />
+              )}
+              {isTranslating ? "Translating..." : isHindi ? "Read in English" : "Translate to Hindi (हिंदी अनुवाद)"}
+            </button>
           </div>
+
           <div className="p-0.5 bg-white rounded-xl flex border border-surface-high shadow-sm shrink-0">
             <button
               onClick={() => setResultMode("simple")}
@@ -174,7 +338,7 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
               {resultMode === "simple" ? "About This Issue" : "Agricultural Summary & Pathology"}
             </h4>
             <p className="text-on-surface-variant text-sm leading-relaxed font-medium">
-              {disease.description}
+              {activeDisease.description}
             </p>
           </div>
 
@@ -185,7 +349,7 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
               {resultMode === "simple" ? "How to Spot It" : "Key Diagnostic Symptoms"}
             </h4>
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {disease.symptoms.map((symptom, i) => (
+              {activeDisease.symptoms.map((symptom, i) => (
                 <li 
                   key={i} 
                   className={`flex gap-3 text-sm p-3.5 rounded-xl border shadow-sm transition-all ${
@@ -246,7 +410,7 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
               })}
             </div>
             
-            {resultMode === "simple" && disease.treatments.length > simpleTreatments.length && (
+            {resultMode === "simple" && activeDisease.treatments.length > simpleTreatments.length && (
               <p className="text-center text-xs text-on-surface-variant italic mt-2">
                 * Some advanced chemical or specialized control protocols are hidden. Switch to <strong>Detailed Mode</strong> above to view them.
               </p>

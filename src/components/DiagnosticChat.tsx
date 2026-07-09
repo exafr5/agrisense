@@ -1,5 +1,19 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Leaf, Sparkles, User, RefreshCw, CheckCircle2, ChevronRight, HelpCircle, History } from "lucide-react";
+import { 
+  Send, 
+  Leaf, 
+  Sparkles, 
+  User, 
+  RefreshCw, 
+  CheckCircle2, 
+  ChevronRight, 
+  HelpCircle, 
+  History,
+  Volume2,
+  VolumeX,
+  Languages,
+  Loader2
+} from "lucide-react";
 import { DiagnosisResult, LanguageCode } from "../types";
 import { TRANSLATIONS } from "../utils/translations";
 import { simulateClientChat } from "../utils/clientSimulator";
@@ -9,6 +23,8 @@ interface Message {
   role: "user" | "model";
   content: string;
   diagnosis?: DiagnosisResult | null;
+  translatedContent?: string;
+  isTranslated?: boolean;
 }
 
 interface DiagnosticChatProps {
@@ -85,6 +101,101 @@ export default function DiagnosticChat({ offlineMode, language = "en", onNewDiag
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [savedDiagnoses, setSavedDiagnoses] = useState<string[]>([]); // To avoid double saving same chat result
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+
+  // Clean up any speaking voice when closing/switching tabs
+  useEffect(() => {
+    return () => {
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const handleSpeakMessage = (msgId: string, content: string, isHindiMsg: boolean) => {
+    if (!window.speechSynthesis) {
+      alert("Speech synthesis is not supported in this browser.");
+      return;
+    }
+
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    // Cancel any current speaking
+    window.speechSynthesis.cancel();
+
+    const cleanContent = content.replace(/[*#_`~]/g, "").trim();
+    const utterance = new SpeechSynthesisUtterance(cleanContent);
+    utterance.lang = isHindiMsg || language === "hi" ? "hi-IN" : "en-IN";
+
+    const voices = window.speechSynthesis.getVoices();
+    const matchedVoice = voices.find(v => v.lang.startsWith(isHindiMsg || language === "hi" ? "hi" : "en"));
+    if (matchedVoice) {
+      utterance.voice = matchedVoice;
+    }
+
+    utterance.rate = 0.9;
+
+    utterance.onend = () => {
+      setSpeakingMsgId(null);
+    };
+    utterance.onerror = () => {
+      setSpeakingMsgId(null);
+    };
+
+    window.speechSynthesis.speak(utterance);
+    setSpeakingMsgId(msgId);
+  };
+
+  const handleTranslateMessage = async (msgId: string) => {
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg) return;
+
+    if (msg.isTranslated) {
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isTranslated: false } : m));
+      if (speakingMsgId === msgId && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        setSpeakingMsgId(null);
+      }
+      return;
+    }
+
+    if (msg.translatedContent) {
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isTranslated: true } : m));
+      if (speakingMsgId === msgId && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        setSpeakingMsgId(null);
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/translate-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: msg.content,
+          targetLanguage: "hi"
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Translation failed");
+      }
+
+      const data = await response.json();
+      setMessages(prev => prev.map(m => m.id === msgId ? { 
+        ...m, 
+        translatedContent: data.translatedText, 
+        isTranslated: true 
+      } : m));
+    } catch (err) {
+      console.error("Translation error:", err);
+    }
+  };
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -247,14 +358,45 @@ export default function DiagnosticChat({ offlineMode, language = "en", onNewDiag
             </div>
 
             {/* Bubble content */}
-            <div className="space-y-3">
+            <div className="space-y-1.5 flex flex-col items-start">
               <div className={`rounded-2xl p-3.5 text-xs sm:text-sm leading-relaxed shadow-sm border ${
                 m.role === "user" 
                   ? "bg-primary text-white border-primary" 
                   : "bg-background border-surface-high text-on-surface"
               }`}>
-                {m.content}
+                {m.isTranslated ? m.translatedContent : m.content}
               </div>
+
+              {/* Speak & Translate buttons for chatbot responses */}
+              {m.role === "model" && m.id !== "welcome" && (
+                <div className="flex gap-1.5 items-center text-[10px] text-on-surface-variant font-bold ml-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSpeakMessage(m.id, m.isTranslated ? m.translatedContent! : m.content, !!m.isTranslated)}
+                    className={`flex items-center gap-1 py-1 px-2.5 rounded-lg border bg-white shadow-sm hover:border-primary-light transition-all cursor-pointer ${
+                      speakingMsgId === m.id ? "border-amber-500 bg-amber-50 text-amber-700 animate-pulse" : "border-surface-high text-on-surface-variant"
+                    }`}
+                  >
+                    {speakingMsgId === m.id ? <VolumeX size={10} className="animate-bounce" /> : <Volume2 size={10} />}
+                    {speakingMsgId === m.id ? "Stop" : "Speak (बोलें)"}
+                  </button>
+
+                  {language !== "hi" && (
+                    <button
+                      type="button"
+                      onClick={() => handleTranslateMessage(m.id)}
+                      className={`flex items-center gap-1 py-1 px-2.5 rounded-lg border transition-all cursor-pointer bg-white shadow-sm ${
+                        m.isTranslated 
+                          ? "border-emerald-600 bg-emerald-50 text-emerald-800 font-bold" 
+                          : "border-surface-high text-on-surface-variant hover:border-primary-light"
+                      }`}
+                    >
+                      <Languages size={10} />
+                      {m.isTranslated ? "Read English" : "Translate (हिंदी)"}
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Inline Diagnosis Card if match occurs */}
               {m.role === "model" && m.diagnosis && (

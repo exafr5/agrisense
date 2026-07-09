@@ -64,6 +64,35 @@ async function generateContentWithFallback(
   throw lastError || new Error("All fallback models failed to generate content");
 }
 
+// Robust helper to extract and clean JSON string from LLM responses
+function cleanJsonText(text: string): string {
+  let clean = text.trim();
+  
+  // Strip markdown code fences if present
+  if (clean.includes("```json")) {
+    const startIndex = clean.indexOf("```json") + 7;
+    const endIndex = clean.lastIndexOf("```");
+    if (endIndex > startIndex) {
+      clean = clean.substring(startIndex, endIndex);
+    }
+  } else if (clean.includes("```")) {
+    const startIndex = clean.indexOf("```") + 3;
+    const endIndex = clean.lastIndexOf("```");
+    if (endIndex > startIndex) {
+      clean = clean.substring(startIndex, endIndex);
+    }
+  }
+  
+  // Extract strictly from the first brace to the last brace
+  const firstBrace = clean.indexOf("{");
+  const lastBrace = clean.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    clean = clean.substring(firstBrace, lastBrace + 1);
+  }
+  
+  return clean.trim();
+}
+
 // Pre-packaged simulated mock diagnoses in case of offline/no-api-key fallback
 const MOCK_DIAGNOSES = {
   early_blight: {
@@ -485,10 +514,22 @@ app.post("/api/diagnose", async (req, res) => {
       console.log("plant.id API responded successfully.");
 
       // Check if it's not a plant
-      const isPlant = plantIdData.result?.is_plant?.binary ?? true;
-      const isPlantProb = plantIdData.result?.is_plant?.probability ?? 1.0;
-      if (!isPlant || isPlantProb < 0.4) {
-        console.log(`plant.id determined this is NOT a plant (is_plant: ${isPlant}, probability: ${isPlantProb}). Returning 'No familiar object found'.`);
+      let isPlant = true;
+      let isPlantProb = 1.0;
+      if (typeof plantIdData.result?.is_plant === "boolean") {
+        isPlant = plantIdData.result.is_plant;
+      } else if (plantIdData.result?.is_plant && typeof plantIdData.result.is_plant === "object") {
+        isPlant = plantIdData.result.is_plant.binary ?? true;
+        isPlantProb = plantIdData.result.is_plant.probability ?? 1.0;
+      }
+
+      const classification = plantIdData.result?.classification?.suggestions?.[0];
+      const classProb = classification?.probability ?? 1.0;
+
+      console.log(`Diagnostic plant.id verification check: isPlant=${isPlant}, isPlantProb=${isPlantProb}, classProb=${classProb}`);
+
+      if (!isPlant || isPlantProb < 0.45 || !classification || classProb < 0.15) {
+        console.log(`plant.id determined this is NOT a plant (is_plant: ${isPlant}, probability: ${isPlantProb}, suggestion probability: ${classProb}). Returning 'No familiar object found'.`);
         const noPlantResult = getNoPlantFoundResponse(language);
         return res.json({
           ...noPlantResult,
@@ -500,11 +541,25 @@ app.post("/api/diagnose", async (req, res) => {
 
       // If Gemini is available, use it to localize and enrich the plant.id response
       if (ai) {
-        console.log("Enriching plant.id results using Gemini AI for language localization...");
-        const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
-Your task is to translate and format the provided raw plant.id diagnosis data into ${targetLanguageName} matching our response schema.
+        try {
+          console.log("Enriching plant.id results using Gemini AI for language localization and validation...");
+          const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
+Your task is to translate, format, and strictly validate the provided raw plant.id diagnosis data into ${targetLanguageName} matching our response schema.
 
-Translate all common names, descriptions, symptoms, and treatment steps into ${targetLanguageName} (except scientific names which should remain as Latin scientific names). Use Indian subcontinent agricultural contexts for treatments.
+CRITICAL NON-PLANT CHECK:
+You must look at BOTH the uploaded image and the raw plant.id JSON.
+If the uploaded image does NOT contain a plant, leaf, crop, flower, fruit, vegetable, or agricultural tree, or if it is a random household object, a human face, an animal, a car, or anything unrelated to plants/agriculture, you MUST return the following response format (translated to ${targetLanguageName}):
+- isHealthy: true
+- cropName: "N/A"
+- diseaseName: "No familiar object found" (translate this strictly to ${targetLanguageName})
+- scientificName: "N/A"
+- confidence: 100
+- severity: "Healthy"
+- description: "No familiar plant or leaf object could be detected in this image. Please upload a clear photo of a crop or leaf." (translate this to ${targetLanguageName})
+- symptoms: ["Non-plant object detected"] (translate this to ${targetLanguageName})
+- treatments: [] (empty array)
+
+Translate all valid common names, descriptions, symptoms, and treatment steps into ${targetLanguageName} (except scientific names which should remain as Latin scientific names). Use Indian subcontinent agricultural contexts for treatments.
 
 CRITICAL REQUIREMENT FOR SIMPLICITY:
 - All explanations, descriptions, and treatment steps must be written in EXTREMELY simple, plain, non-technical terms.
@@ -514,8 +569,17 @@ CRITICAL REQUIREMENT FOR SIMPLICITY:
 
 Return the output strictly in the requested JSON format matching the schema. Do not include markdown formatting or backticks.`;
 
-        const response = await generateContentWithFallback(ai, {
-          contents: `Here is the raw plant.id (photo.id) API output for a crop leaf scan:
+          const response = await generateContentWithFallback(ai, {
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    data: cleanBase64,
+                    mimeType: "image/jpeg"
+                  }
+                },
+                {
+                  text: `Here is the raw plant.id (photo.id) API output for a crop leaf scan:
 ${JSON.stringify(plantIdData, null, 2)}
 
 Please convert this into a single localized DiagnosisResult JSON conforming to this schema:
@@ -527,75 +591,81 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
 - severity: "High", "Moderate", "Low", or "Healthy"
 - description: a localized 2-3 sentence overview of this crop condition
 - symptoms: array of 3-5 localized symptoms
-- treatments: array of localized treatment objects, each having { category: string, steps: string[] } (using organic/Indian practices where applicable)`,
-          config: {
-            systemInstruction: systemPrompt,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                isHealthy: { type: Type.BOOLEAN },
-                cropName: { type: Type.STRING },
-                diseaseName: { type: Type.STRING },
-                scientificName: { type: Type.STRING },
-                confidence: { type: Type.NUMBER },
-                severity: { type: Type.STRING },
-                description: { type: Type.STRING },
-                symptoms: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
-                },
-                treatments: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      category: { type: Type.STRING },
-                      steps: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING }
-                      }
-                    },
-                    required: ["category", "steps"]
-                  }
+- treatments: array of localized treatment objects, each having { category: string, steps: string[] } (using organic/Indian practices where applicable)`
                 }
-              },
-              required: [
-                "isHealthy",
-                "cropName",
-                "diseaseName",
-                "scientificName",
-                "confidence",
-                "severity",
-                "description",
-                "symptoms",
-                "treatments"
               ]
+            },
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  isHealthy: { type: Type.BOOLEAN },
+                  cropName: { type: Type.STRING },
+                  diseaseName: { type: Type.STRING },
+                  scientificName: { type: Type.STRING },
+                  confidence: { type: Type.NUMBER },
+                  severity: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  symptoms: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  treatments: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        category: { type: Type.STRING },
+                        steps: {
+                          type: Type.ARRAY,
+                          items: { type: Type.STRING }
+                        }
+                      },
+                      required: ["category", "steps"]
+                    }
+                  }
+                },
+                required: [
+                  "isHealthy",
+                  "cropName",
+                  "diseaseName",
+                  "scientificName",
+                  "confidence",
+                  "severity",
+                  "description",
+                  "symptoms",
+                  "treatments"
+                ]
+              }
             }
-          }
-        });
-
-        const text = response.text;
-        if (text) {
-          const result = JSON.parse(text.trim());
-          return res.json({
-            ...result,
-            createdAt: new Date().toISOString(),
-            simulated: false,
-            dataSource: "plant.id + Gemini"
           });
+
+          const text = response.text;
+          if (text) {
+            const result = JSON.parse(cleanJsonText(text));
+            return res.json({
+              ...result,
+              createdAt: new Date().toISOString(),
+              simulated: false,
+              dataSource: "plant.id + Gemini"
+            });
+          }
+        } catch (enrichError: any) {
+          console.warn("Gemini enrichment failed (potentially due to restricted/blocked API key). Falling back to direct plant.id parser:", enrichError?.message || enrichError);
         }
       }
 
       // Fallback manual extraction if Gemini is not available or failed to enrich
-      const classification = plantIdData.result?.classification?.suggestions?.[0];
+      const fallbackClassification = plantIdData.result?.classification?.suggestions?.[0];
       const disease = plantIdData.result?.disease?.suggestions?.[0];
       
       const isHealthy = plantIdData.result?.is_healthy?.binary ?? (!disease || disease.probability < 0.2);
-      const cropName = classification?.name ?? "Crop";
+      const cropName = fallbackClassification?.name ?? "Crop";
       const diseaseName = isHealthy ? "Healthy Foliage Status" : (disease?.common_names?.[0] ?? disease?.name ?? "Unknown disease");
-      const scientificName = isHealthy ? (classification?.name ?? "N/A") : (disease?.name ?? "N/A");
-      const confidence = Math.round((isHealthy ? (classification?.probability ?? 0.9) : (disease?.probability ?? 0.8)) * 100);
+      const scientificName = isHealthy ? (fallbackClassification?.name ?? "N/A") : (disease?.name ?? "N/A");
+      const confidence = Math.round((isHealthy ? (fallbackClassification?.probability ?? 0.9) : (disease?.probability ?? 0.8)) * 100);
       const severity = isHealthy ? "Healthy" : "Moderate";
       const description = isHealthy 
         ? "The crop foliage appears vigorous and healthy with active photosynthesis." 
@@ -953,6 +1023,179 @@ You must return your output strictly in JSON format matching this schema:
     });
   }
 });
+
+// Translation fallbacks for offline or simulated mode
+function getSimulatedHindiTranslation(diag: any): any {
+  const cropMap: Record<string, string> = {
+    "Tomato": "टमाटर",
+    "Potato": "आलू",
+    "Pepper": "मिर्च",
+    "Chilli": "मिर्च",
+    "Rice": "धान (चावल)",
+    "Paddy": "धान (चावल)",
+    "Cotton": "कपास",
+    "Lemon": "नींबू",
+    "Lime": "नींबू",
+    "Wheat": "गेहूं",
+    "Crop": "फसल"
+  };
+
+  const diseaseMap: Record<string, string> = {
+    "Early Blight": "अगेती झुलसा",
+    "Late Blight": "पछेती झुलसा",
+    "Leaf Mold": "पत्ती का मोल्ड रोग",
+    "Bacterial Spot": "जीवाणु जनित धब्बा रोग",
+    "Bacterial Wilt": "जीवाणु जनित मुरझान रोग",
+    "Crown Gall": "क्राउन गॉल (ट्यूमर रोग)",
+    "Potato Scab": "आलू का खुरंड रोग",
+    "Damping Off": "आर्द्र पतन (डैम्पिंग ऑफ)",
+    "Fusarium Wilt": "फ्यूजेरियम विल्ट",
+    "Rice Blast": "धान का झोंका रोग (ब्लास्ट)",
+    "Cotton Leaf Curl": "कपास का पत्ता मरोड़ रोग",
+    "Citrus Canker": "नींबू का कैंकर रोग",
+    "Black Scurf": "आलू का ब्लैक स्कर्फ",
+    "Black Rust": "गेहूं का काला किट्ट",
+    "Healthy Foliage Status": "स्वस्थ पत्ती स्थिति",
+    "No familiar object found": "कोई परिचित वस्तु नहीं मिली"
+  };
+
+  const categoryMap: Record<string, string> = {
+    "Immediate Actions": "तत्काल कार्रवाई",
+    "Cultural Controls": "सांस्कृतिक नियंत्रण",
+    "Organic Solutions": "जैविक समाधान",
+    "Chemical Treatments": "रासायनिक उपचार",
+    "Prevention": "बचाव व रोकथाम",
+    "Recommended Practices": "अनुशंसित प्रथाएं",
+    "Supportive Care": "सहायक देखभाल"
+  };
+
+  return {
+    ...diag,
+    cropName: cropMap[diag.cropName] || diag.cropName,
+    diseaseName: diseaseMap[diag.diseaseName] || diag.diseaseName,
+    description: `[अनुवाद] ${diag.description || "कोई विवरण उपलब्ध नहीं है।"}`,
+    symptoms: diag.symptoms ? diag.symptoms.map((s: string) => `लक्षण: ${s}`) : [],
+    treatments: diag.treatments ? diag.treatments.map((t: any) => ({
+      category: categoryMap[t.category] || t.category,
+      steps: t.steps ? t.steps.map((st: string) => `कदम: ${st}`) : []
+    })) : []
+  };
+}
+
+// API Endpoint for translating structured diagnosis
+app.post("/api/translate-diagnosis", async (req, res) => {
+  const { diagnosis, targetLanguage = "hi" } = req.body;
+  const ai = getAiClient();
+
+  if (!ai) {
+    return res.json(getSimulatedHindiTranslation(diagnosis));
+  }
+
+  try {
+    const targetLanguageName = targetLanguage === "hi" ? "Hindi" : "English";
+    const systemPrompt = `You are AgriSense AI, an expert agricultural pathology translator.
+Your task is to translate the provided structured plant diagnosis object into extremely simple, humble, farmer-friendly ${targetLanguageName}.
+Translate all crop names, disease names (except scientific name which must remain exactly as it is), descriptions, symptoms, and treatment categories/steps into simple everyday ${targetLanguageName} words.
+Return the output strictly in JSON format matching the input schema exactly. Do not include markdown formatting or backticks outside the json.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: `Please translate this diagnosis to simple farmer-friendly ${targetLanguageName}:
+${JSON.stringify(diagnosis, null, 2)}`,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isHealthy: { type: Type.BOOLEAN },
+            cropName: { type: Type.STRING },
+            diseaseName: { type: Type.STRING },
+            scientificName: { type: Type.STRING },
+            confidence: { type: Type.NUMBER },
+            severity: { type: Type.STRING },
+            description: { type: Type.STRING },
+            symptoms: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            },
+            treatments: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  category: { type: Type.STRING },
+                  steps: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  }
+                },
+                required: ["category", "steps"]
+              }
+            }
+          },
+          required: [
+            "isHealthy",
+            "cropName",
+            "diseaseName",
+            "scientificName",
+            "confidence",
+            "severity",
+            "description",
+            "symptoms",
+            "treatments"
+          ]
+        }
+      }
+    });
+
+    const text = response.text;
+    if (text) {
+      const result = JSON.parse(cleanJsonText(text));
+      return res.json({
+        ...result,
+        translated: true
+      });
+    }
+    throw new Error("Empty translation text");
+  } catch (err: any) {
+    console.error("Translation API Error, falling back to simulated Hindi:", err);
+    return res.json(getSimulatedHindiTranslation(diagnosis));
+  }
+});
+
+// API Endpoint for translating general text
+app.post("/api/translate-text", async (req, res) => {
+  const { text, targetLanguage = "hi" } = req.body;
+  const ai = getAiClient();
+
+  if (!ai || !text) {
+    return res.json({ translatedText: `[अनुवाद] ${text}` });
+  }
+
+  try {
+    const targetLanguageName = targetLanguage === "hi" ? "Hindi" : "English";
+    const systemPrompt = `You are AgriSense AI Agronomist, translating farmer-agronomist communications into extremely simple, warm, everyday, farmer-friendly ${targetLanguageName}. Do not add any conversational padding like "Sure, here is the translation" - just output the exact translated text.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: `Translate this text to simple ${targetLanguageName}: "${text}"`,
+      config: {
+        systemInstruction: systemPrompt,
+      }
+    });
+
+    const translated = response.text?.trim() || text;
+    return res.json({
+      translatedText: translated,
+      translated: true
+    });
+  } catch (err: any) {
+    console.error("Text Translation Error:", err);
+    return res.json({ translatedText: `[अनुवाद] ${text}` });
+  }
+});
+
 
 // Serve Vite in development, static files in production
 async function startServer() {

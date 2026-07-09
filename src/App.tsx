@@ -315,6 +315,16 @@ export default function App() {
             <Sprout size={14} /> AgriSense Core
           </p>
           <p className="opacity-70 font-medium">© 2026 AgriSense. {t.groundedInScience}.</p>
+          <p className="text-[10px] opacity-60 hover:opacity-100 transition-opacity">
+            <a 
+              href="https://guns.lol/rizzinaxe" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="hover:underline"
+            >
+              developed by dhrxv
+            </a>
+          </p>
         </div>
         <div className="flex gap-4 font-semibold text-primary">
           <a href="#" onClick={(e) => { e.preventDefault(); alert("AgriSense values your operational privacy. All raw files are processed ephemeral on secured servers; cached reports reside purely inside your local browser context."); }} className="hover:underline">Privacy Charter</a>
