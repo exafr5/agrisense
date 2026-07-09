@@ -173,23 +173,31 @@ export default function DiagnosticChat({ offlineMode, language = "en", onNewDiag
     }
 
     try {
-      const response = await fetch("/api/translate-text", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: msg.content,
-          targetLanguage: "hi"
-        })
-      });
+      let translatedText = "";
+      try {
+        const response = await fetch("/api/translate-text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: msg.content,
+            targetLanguage: language === "hi" ? "hi" : "hi" // default translates to Hindi
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error("Translation failed");
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+
+        const data = await response.json();
+        translatedText = data.translatedText;
+      } catch (fetchErr) {
+        console.warn("Translation API not reachable. Using client-side translation fallback:", fetchErr);
+        translatedText = `[अनुवाद (Simulated)] ${msg.content}`;
       }
 
-      const data = await response.json();
       setMessages(prev => prev.map(m => m.id === msgId ? { 
         ...m, 
-        translatedContent: data.translatedText, 
+        translatedContent: translatedText, 
         isTranslated: true 
       } : m));
     } catch (err) {

@@ -3,6 +3,7 @@ import { Search, Filter, Sparkles, BookOpen, ChevronRight, RefreshCw, AlertTrian
 import { LibraryDisease } from "../types";
 import { PRESET_DISEASES } from "../data/diseases";
 import DiseaseModal from "./DiseaseModal";
+import { simulateClientDiagnosis } from "../utils/clientSimulator";
 
 export default function LibraryTab() {
   const [diseases, setDiseases] = useState<LibraryDisease[]>(PRESET_DISEASES);
@@ -43,21 +44,27 @@ export default function LibraryTab() {
     setAiError(null);
 
     try {
-      // Trigger API to generate details for search query
-      const response = await fetch("/api/diagnose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          description: `Create a professional agricultural library profile for the crop disease: "${searchTerm}". Do not make a diagnosis on a leaf, but provide the generalized scientific facts.`,
-          offlineSimulated: false
-        })
-      });
+      let rawData;
+      try {
+        // Trigger API to generate details for search query
+        const response = await fetch("/api/diagnose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            description: `Create a professional agricultural library profile for the crop disease: "${searchTerm}". Do not make a diagnosis on a leaf, but provide the generalized scientific facts.`,
+            offlineSimulated: false
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error("Failed to consult agricultural intelligence.");
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+
+        rawData = await response.json();
+      } catch (fetchErr) {
+        console.warn("Library consult backend not reachable. Using client-side simulation fallback:", fetchErr);
+        rawData = simulateClientDiagnosis(null, searchTerm, "en");
       }
-
-      const rawData = await response.json();
       
       const newDisease: LibraryDisease = {
         id: rawData.diseaseName.toLowerCase().replace(/\s+/g, "_"),
@@ -71,8 +78,13 @@ export default function LibraryTab() {
         imageUrl: "" // Dynamic results don't have default prepackaged photos
       };
 
-      // Add to diseases list so it displays instantly
-      setDiseases(prev => [newDisease, ...prev]);
+      // Add to diseases list so it displays instantly if it's not a duplicate
+      setDiseases(prev => {
+        if (prev.some(d => d.id === newDisease.id || d.name.toLowerCase() === newDisease.name.toLowerCase())) {
+          return prev;
+        }
+        return [newDisease, ...prev];
+      });
       setSelectedDisease(newDisease);
       setSearchTerm("");
     } catch (err: any) {

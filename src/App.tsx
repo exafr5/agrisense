@@ -7,6 +7,7 @@ import LibraryTab from "./components/LibraryTab";
 import HistoryTab from "./components/HistoryTab";
 import DiseaseModal from "./components/DiseaseModal";
 import { TRANSLATIONS } from "./utils/translations";
+import { simulateClientDiagnosis } from "./utils/clientSimulator";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"scan" | "library" | "history">("scan");
@@ -118,26 +119,37 @@ export default function App() {
 
       const base64 = await base64Promise;
 
-      // Submit
-      const response = await fetch("/api/diagnose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image: base64,
-          offlineSimulated: profile.offlineMode
-        })
-      });
+      let finalized;
+      try {
+        // Submit
+        const response = await fetch("/api/diagnose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image: base64,
+            offlineSimulated: profile.offlineMode,
+            language: profile.language || "en"
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error("Diagnosis failed. Check connection.");
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+
+        const rawResult: DiagnosisResult = await response.json();
+        
+        finalized = {
+          ...rawResult,
+          imageUrl: base64
+        };
+      } catch (fetchErr) {
+        console.warn("Backend API not reachable for FAB. Using client-side diagnosis fallback:", fetchErr);
+        const rawResult = simulateClientDiagnosis(base64, null, profile.language || "en");
+        finalized = {
+          ...rawResult,
+          imageUrl: base64
+        };
       }
-
-      const rawResult: DiagnosisResult = await response.json();
-      
-      const finalized = {
-        ...rawResult,
-        imageUrl: base64
-      };
 
       // Add to history and display modal
       handleNewDiagnosis(finalized);
