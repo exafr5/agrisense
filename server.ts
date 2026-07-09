@@ -516,6 +516,45 @@ function formatChatHistory(messages: any[]): any[] {
   }));
 }
 
+// Preprocessor to handle negation in symptoms (e.g. "no mold", "no spots") and explicit healthy statuses
+function preprocessTextForSimulator(text: string): { cleanedText: string; isExplicitlyHealthy: boolean } {
+  const lower = text.toLowerCase();
+
+  // Explicit health/good condition indicators
+  const healthyPhrases = [
+    "healthy", "perfect", "excellent", "vigorous", "normal", "good health", "all good", "doing well",
+    "no symptoms", "no disease", "no infection", "no damage", "clean leaves", "perfectly healthy",
+    "excellent health", "fully green", "no spots", "no mold", "no yellowing",
+    "स्वस्थ", "अच्छा", "कोई लक्षण नहीं", "कोई बीमारी नहीं", "बढ़िया"
+  ];
+  const hasHealthyPhrase = healthyPhrases.some(phrase => lower.includes(phrase));
+
+  // Remove common negated descriptions to prevent false positives in string matching
+  const negations = [
+    "no spots", "no yellowing", "no curling", "no mold", "no holes", "no discoloration", 
+    "no blight", "no infection", "no lesions", "no disease", "no damage", "no spots",
+    "no rot", "no wilting", "no mosaics", "no curling", "no spot", "no leaf mold",
+    "without spots", "without mold", "without yellowing", "without holes", "without discoloration", 
+    "without disease", "without blight", "without rot", "without infection",
+    "free of spots", "free of mold", "free of disease", "free of yellowing",
+    "कोई बीमारी नहीं", "कोई धब्बा नहीं", "कोई फफूंद नहीं", "कोई पीलापन नहीं", "कोई धब्बे नहीं",
+    "नहीं है", "नहीं दिख रहा", "नहीं दिख रही"
+  ];
+
+  let cleaned = lower;
+  negations.forEach(neg => {
+    cleaned = cleaned.replace(new RegExp(neg, "g"), " ");
+  });
+
+  // Handle word boundaries for simple patterns "no X", "not X"
+  cleaned = cleaned.replace(/\b(no|not|without|free\s+of)\s+(spots|spot|yellowing|yellow|mold|moldy|blight|curling|curl|mosaic|rot|deficiency|holes|hole|discoloration|lesions|lesion|wilting|wilt)\b/g, " ");
+
+  // Hindi simple negation
+  cleaned = cleaned.replace(/(धब्बा|पीलापन|फफूंद|झुलसा|सिकुड़न|बीमारी|लक्षण)\s+(नहीं)/g, " ");
+
+  return { cleanedText: cleaned, isExplicitlyHealthy: hasHealthyPhrase };
+}
+
 app.post("/api/diagnose", async (req, res) => {
   const { image, description, offlineSimulated, language } = req.body;
   const targetLanguageName = LANGUAGE_NAMES[language as string] || "English";
@@ -527,20 +566,51 @@ app.post("/api/diagnose", async (req, res) => {
   // Fallback to simulated if offlineSimulated or if we have no active APIs
   if (offlineSimulated || (!ai && !isPlantIdActive)) {
     // High-fidelity fallback / simulated responses based on keywords or inputs
+    const desc = description || "";
+    const { cleanedText, isExplicitlyHealthy } = preprocessTextForSimulator(desc);
+    
     let choice = "healthy";
-    const descLower = (description || "").toLowerCase();
 
-    if (descLower.includes("early blight") || descLower.includes("concentric") || descLower.includes("target")) {
+    const hasDiseaseKeywords = cleanedText.includes("blight") || 
+                               cleanedText.includes("concentric") || 
+                               cleanedText.includes("target") || 
+                               cleanedText.includes("phytophthora") || 
+                               cleanedText.includes("mold") || 
+                               cleanedText.includes("velvety") || 
+                               cleanedText.includes("bacterial") || 
+                               cleanedText.includes("greasy") || 
+                               cleanedText.includes("deficiency") || 
+                               cleanedText.includes("chlorosis") || 
+                               cleanedText.includes("mosaic") || 
+                               cleanedText.includes("mottling") || 
+                               cleanedText.includes("curling") || 
+                               cleanedText.includes("stunted") || 
+                               cleanedText.includes("curl") || 
+                               cleanedText.includes("virus") ||
+                               cleanedText.includes("छल्ले") || 
+                               cleanedText.includes("अगेती") || 
+                               cleanedText.includes("पछेती") || 
+                               cleanedText.includes("मखमली") || 
+                               cleanedText.includes("फफूंद") || 
+                               cleanedText.includes("तैलीय") || 
+                               cleanedText.includes("कमी") || 
+                               cleanedText.includes("पोषक") || 
+                               cleanedText.includes("विषाणु") || 
+                               cleanedText.includes("मोज़ेक");
+
+    if (isExplicitlyHealthy && !hasDiseaseKeywords) {
+      choice = "healthy";
+    } else if (cleanedText.includes("early blight") || cleanedText.includes("concentric") || cleanedText.includes("target") || cleanedText.includes("छल्ले") || cleanedText.includes("अगेती")) {
       choice = "early_blight";
-    } else if (descLower.includes("late blight") || descLower.includes("water-soaked") || descLower.includes("phytophthora")) {
+    } else if (cleanedText.includes("late blight") || cleanedText.includes("water-soaked") || cleanedText.includes("phytophthora") || cleanedText.includes("पछेती")) {
       choice = "late_blight";
-    } else if (descLower.includes("mold") || descLower.includes("velvety") || descLower.includes("humid")) {
+    } else if (cleanedText.includes("mold") || cleanedText.includes("velvety") || cleanedText.includes("humid") || cleanedText.includes("मखमली") || cleanedText.includes("फफूंद")) {
       choice = "leaf_mold";
-    } else if (descLower.includes("bacterial") || descLower.includes("greasy") || descLower.includes("pepper")) {
+    } else if (cleanedText.includes("bacterial") || cleanedText.includes("greasy") || cleanedText.includes("pepper") || cleanedText.includes("तैलीय")) {
       choice = "bacterial_spot";
-    } else if (descLower.includes("nutrient") || descLower.includes("deficiency") || descLower.includes("chlorosis") || (descLower.includes("yellowing") && descLower.includes("vein"))) {
+    } else if (cleanedText.includes("nutrient") || cleanedText.includes("deficiency") || cleanedText.includes("chlorosis") || (cleanedText.includes("yellowing") && cleanedText.includes("vein")) || cleanedText.includes("कमी") || cleanedText.includes("पोषक")) {
       choice = "nutrient_deficiency";
-    } else if (descLower.includes("mosaic") || descLower.includes("mottling") || descLower.includes("curling") || descLower.includes("stunted") || descLower.includes("curl") || descLower.includes("virus")) {
+    } else if (cleanedText.includes("mosaic") || cleanedText.includes("mottling") || cleanedText.includes("curling") || cleanedText.includes("stunted") || cleanedText.includes("curl") || cleanedText.includes("virus") || cleanedText.includes("विषाणु") || cleanedText.includes("मोज़ेक")) {
       choice = "viral_disease";
     } else if (image) {
       // If we have an image, let's randomly assign a disease for high-quality demo (excluding healthy, to make it fun, or healthy sometimes)
@@ -548,9 +618,9 @@ app.post("/api/diagnose", async (req, res) => {
       // Hash the image length to make it deterministic for the same image upload
       const hashIndex = image.length % keys.length;
       choice = keys[hashIndex];
-    } else {
+    } else if (cleanedText.length > 0) {
       // Just some general problem description
-      if (descLower.includes("yellow") || descLower.includes("spot") || descLower.includes("brown")) {
+      if (cleanedText.includes("yellow") || cleanedText.includes("spot") || cleanedText.includes("brown") || cleanedText.includes("पीला") || cleanedText.includes("धब्बा")) {
         choice = "early_blight";
       } else {
         choice = "healthy";
@@ -986,34 +1056,91 @@ app.post("/api/chat", async (req, res) => {
 
   if (!ai || offlineSimulated) {
     // High-fidelity local diagnostic chatbot simulation
-    const descLower = lastUserMessage.toLowerCase();
+    const lang = (language as string) || "en";
+    const { cleanedText, isExplicitlyHealthy } = preprocessTextForSimulator(lastUserMessage);
     let reply = "";
-    let diagnosis = null;
+    let diagnosisKey: string | null = null;
 
-    if (descLower.includes("early blight") || descLower.includes("concentric") || descLower.includes("target")) {
-      reply = `I see. Concentric rings forming target-like patterns on older foliage strongly indicate Early Blight (Alternaria solani). For smallholder Indian farms, pruning lower leaves and applying organic Neem oil or biofungicides like Trichoderma viride is highly recommended.`;
-      diagnosis = { ...MOCK_DIAGNOSES.early_blight, createdAt: new Date().toISOString() };
-    } else if (descLower.includes("late blight") || descLower.includes("water-soaked") || descLower.includes("phytophthora")) {
-      reply = `That is critical. Large water-soaked lesions that blacken rapidly under cool, damp conditions indicate Late Blight (Phytophthora infestans). This is highly destructive. Remove the infected plants immediately and spray copper oxychloride on neighboring healthy crops.`;
-      diagnosis = { ...MOCK_DIAGNOSES.late_blight, createdAt: new Date().toISOString() };
-    } else if (descLower.includes("mold") || descLower.includes("velvety") || descLower.includes("humid")) {
-      reply = `Based on the velvety growth and light-yellow spots on your crop foliage, this looks like Leaf Mold (Passalora fulva). In India, increasing ventilation in polyhouses and dusting organic wood ash is a helpful local cultural remedy.`;
-      diagnosis = { ...MOCK_DIAGNOSES.leaf_mold, createdAt: new Date().toISOString() };
-    } else if (descLower.includes("bacterial") || descLower.includes("greasy") || descLower.includes("pepper")) {
-      reply = `Small, greasy dark spots with faint yellow margins on pepper/chilli leaves point to Bacterial Spot (Xanthomonas campestris). Ensure seed treatment with hot water and avoid irrigation during wet periods.`;
-      diagnosis = { ...MOCK_DIAGNOSES.bacterial_spot, createdAt: new Date().toISOString() };
-    } else if (descLower.includes("nutrient") || descLower.includes("deficiency") || descLower.includes("chlorosis") || (descLower.includes("yellowing") && descLower.includes("vein"))) {
-      reply = `This indicates an abiotic Nutritional Deficiency. Uniform yellowing starting from leaf tips and interveinal chlorosis (green veins) with no fungal spots are key characteristics. We recommend testing your soil pH and applying balanced organic manure or nitrogen-rich compost tea.`;
-      diagnosis = { ...MOCK_DIAGNOSES.nutrient_deficiency, createdAt: new Date().toISOString() };
-    } else if (descLower.includes("mosaic") || descLower.includes("mottling") || descLower.includes("curling") || descLower.includes("stunted") || descLower.includes("curl") || descLower.includes("virus")) {
-      reply = `This looks like a Viral Infection (such as Mosaic Virus or Leaf Curl Complex). Characterized by mosaic mottling, crinkled texture, leaf curling, and stunting with no mold, this is spread by pests like whiteflies. Immediately pull and destroy heavily infected plants and use organic Neem oil to control insect vectors.`;
-      diagnosis = { ...MOCK_DIAGNOSES.viral_disease, createdAt: new Date().toISOString() };
-    } else if (descLower.includes("healthy") || descLower.includes("perfect") || descLower.includes("no spots")) {
-      reply = `Excellent. Your foliage appears vibrant green and displays solid turgor pressure. This indicates healthy leaf status with active photosynthesis. Keep applying cow dung manure and Panchagavya for high vigor.`;
-      diagnosis = { ...MOCK_DIAGNOSES.healthy, createdAt: new Date().toISOString() };
+    const hasDiseaseKeywords = cleanedText.includes("blight") || 
+                               cleanedText.includes("concentric") || 
+                               cleanedText.includes("target") || 
+                               cleanedText.includes("phytophthora") || 
+                               cleanedText.includes("mold") || 
+                               cleanedText.includes("velvety") || 
+                               cleanedText.includes("bacterial") || 
+                               cleanedText.includes("greasy") || 
+                               cleanedText.includes("deficiency") || 
+                               cleanedText.includes("chlorosis") || 
+                               cleanedText.includes("mosaic") || 
+                               cleanedText.includes("mottling") || 
+                               cleanedText.includes("curling") || 
+                               cleanedText.includes("stunted") || 
+                               cleanedText.includes("curl") || 
+                               cleanedText.includes("virus") ||
+                               cleanedText.includes("छल्ले") || 
+                               cleanedText.includes("अगेती") || 
+                               cleanedText.includes("पछेती") || 
+                               cleanedText.includes("मखमली") || 
+                               cleanedText.includes("फफूंद") || 
+                               cleanedText.includes("तैलीय") || 
+                               cleanedText.includes("कमी") || 
+                               cleanedText.includes("पोषक") || 
+                               cleanedText.includes("विषाणु") || 
+                               cleanedText.includes("मोज़ेक");
+
+    if (isExplicitlyHealthy && !hasDiseaseKeywords) {
+      reply = lang === "hi"
+        ? "बहुत बढ़िया! आपकी फसल की पत्तियां पूरी तरह स्वस्थ, हरी और चमकदार दिख रही हैं। मिट्टी की सेहत बनाए रखने के लिए समय-समय पर वर्मीकम्पोस्ट या पंचगव्य का उपयोग जारी रखें।"
+        : `Excellent. Your foliage appears vibrant green and displays solid turgor pressure. This indicates healthy leaf status with active photosynthesis. Keep applying cow dung manure and Panchagavya for high vigor.`;
+      diagnosisKey = "healthy";
+    } else if (cleanedText.includes("early blight") || cleanedText.includes("concentric") || cleanedText.includes("target") || cleanedText.includes("छल्ले") || cleanedText.includes("अगेती")) {
+      reply = lang === "hi"
+        ? "समझ गया। पुरानी पत्तियों पर गोलाकार 'निशाना धब्बे' (concentric rings) बनना अगेती झुलसा (Early Blight) रोग का मजबूत लक्षण है। सूखी धूप के समय संक्रमित निचली पत्तियों को तुरंत हटा दें और जैविक नीम के तेल का छिड़काव करें।"
+        : `I see. Concentric rings forming target-like patterns on older foliage strongly indicate Early Blight (Alternaria solani). For smallholder Indian farms, pruning lower leaves and applying organic Neem oil or biofungicides like Trichoderma viride is highly recommended.`;
+      diagnosisKey = "early_blight";
+    } else if (cleanedText.includes("late blight") || cleanedText.includes("water-soaked") || cleanedText.includes("phytophthora") || cleanedText.includes("पछेती")) {
+      reply = lang === "hi"
+        ? "यह बहुत गंभीर स्थिति है। ठंडे और गीले मौसम में पत्तियों पर तेजी से फैलने वाले पानीदार धब्बे पछेती झुलसा (Late Blight) की पहचान हैं। संक्रमित पौधों को तुरंत उखाड़कर नष्ट करें और शेष फसलों पर तांबा युक्त जैविक कवकनाशी का छिड़काव करें।"
+        : `That is critical. Large water-soaked lesions that blacken rapidly under cool, damp conditions indicate Late Blight (Phytophthora infestans). This is highly destructive. Remove the infected plants immediately and spray copper oxychloride on neighboring healthy crops.`;
+      diagnosisKey = "late_blight";
+    } else if (cleanedText.includes("mold") || cleanedText.includes("velvety") || cleanedText.includes("humid") || cleanedText.includes("मखमली") || cleanedText.includes("फफूंद")) {
+      reply = lang === "hi"
+        ? "पत्तियों की निचली सतह पर जैतून-हरे या भूरे रंग की मखमली परत का होना लीफ मोल्ड (Leaf Mold) का लक्षण है। ग्रीनहाउस या पॉलीहाउस में हवा का प्रवाह बढ़ाएं और आर्द्रता को कम रखें।"
+        : `Based on the velvety growth and light-yellow spots on your crop foliage, this looks like Leaf Mold (Passalora fulva). In India, increasing ventilation in polyhouses and dusting organic wood ash is a helpful local cultural remedy.`;
+      diagnosisKey = "leaf_mold";
+    } else if (cleanedText.includes("bacterial") || cleanedText.includes("greasy") || cleanedText.includes("pepper") || cleanedText.includes("तैलीय")) {
+      reply = lang === "hi"
+        ? "मिर्च या टमाटर की पत्तियों पर छोटे, काले चिकने या तैलीय धब्बे बैक्टीरियल स्पॉट (Bacterial Spot) के लक्षण हैं। गीली पत्तियों को छूने से बचें और तांबे वाले जैविक कवकनाशी का छिड़काव करें।"
+        : `Small, greasy dark spots with faint yellow margins on pepper/chilli leaves point to Bacterial Spot (Xanthomonas campestris). Ensure seed treatment with hot water and avoid irrigation during wet periods.`;
+      diagnosisKey = "bacterial_spot";
+    } else if (cleanedText.includes("nutrient") || cleanedText.includes("deficiency") || cleanedText.includes("chlorosis") || (cleanedText.includes("yellowing") && cleanedText.includes("vein")) || cleanedText.includes("कमी") || cleanedText.includes("पोषक")) {
+      reply = lang === "hi"
+        ? "यह एक अजैविक पोषक तत्व की कमी (Nutritional Deficiency) का संकेत है। बिना किसी फंगस या धब्बे के पत्ती के सिरों से शुरू होने वाला समान पीलापन या हरी नसें इस कमी को दर्शाती हैं। कृपया संतुलित जैविक खाद, वर्मीकम्पोस्ट या नीम की खली का प्रयोग करें।"
+        : `This indicates an abiotic Nutritional Deficiency. Uniform yellowing starting from leaf tips and interveinal chlorosis (green veins) with no fungal spots are key characteristics. We recommend testing your soil pH and applying balanced organic manure or nitrogen-rich compost tea.`;
+      diagnosisKey = "nutrient_deficiency";
+    } else if (cleanedText.includes("mosaic") || cleanedText.includes("mottling") || cleanedText.includes("curling") || cleanedText.includes("stunted") || cleanedText.includes("curl") || cleanedText.includes("virus") || cleanedText.includes("विषाणु") || cleanedText.includes("मोज़ेक")) {
+      reply = lang === "hi"
+        ? "यह एक विषाणु जनित रोग (Viral Infection) का संकेत है, जैसे मोज़ेक या लीफ कर्ल। यह अक्सर सफेद मक्खी या एफिड्स जैसे रस चूसने वाले कीटों द्वारा फैलता है। संक्रमित पौधों को तुरंत उखाड़ दें और कीटों को नियंत्रित करने के लिए जैविक नीम के तेल का छिड़काव करें।"
+        : `This looks like a Viral Infection (such as Mosaic Virus or Leaf Curl Complex). Characterized by mosaic mottling, crinkled texture, leaf curling, and stunting with no mold, this is spread by pests like whiteflies. Immediately pull and destroy heavily infected plants and use organic Neem oil to control insect vectors.`;
+      diagnosisKey = "viral_disease";
+    } else if (cleanedText.includes("healthy") || cleanedText.includes("perfect") || cleanedText.includes("no spots") || cleanedText.includes("स्वस्थ")) {
+      reply = lang === "hi"
+        ? "बहुत बढ़िया! आपकी फसल की पत्तियां पूरी तरह स्वस्थ, हरी और चमकदार दिख रही हैं। मिट्टी की सेहत बनाए रखने के लिए समय-समय पर वर्मीकम्पोस्ट या पंचगव्य का उपयोग जारी रखें।"
+        : `Excellent. Your foliage appears vibrant green and displays solid turgor pressure. This indicates healthy leaf status with active photosynthesis. Keep applying cow dung manure and Panchagavya for high vigor.`;
+      diagnosisKey = "healthy";
     } else {
-      // General response asking for clarification
-      reply = `Greetings! I am the AgriSense AI Agronomist, based in India. Please describe your crop type (e.g. Tomato/टमाटर, Chilli/मिर्च, Paddy/धान, Cotton/कпас) and any specific foliage symptoms (such as spot colors, concentric rings, or water-soaked patches) so I can diagnose it in real-time.`;
+      reply = lang === "hi"
+        ? "नमस्कार! मैं आपका एआई कृषि विशेषज्ञ सलाहकार हूँ। कृपया अपनी फसल का नाम (जैसे टमाटर, मिर्च, धान) और पत्ती पर दिखने वाले लक्षणों का वर्णन करें ताकि मैं सही उपचार बता सकूँ।"
+        : `Greetings! I am the AgriSense AI Agronomist, based in India. Please describe your crop type (e.g. Tomato/टमाटर, Chilli/मिर्च, Paddy/धान, Cotton/कपास) and any specific foliage symptoms (such as spot colors, concentric rings, or water-soaked patches) so I can diagnose it in real-time.`;
+    }
+
+    let diagnosis = null;
+    if (diagnosisKey) {
+      const baseResult = MOCK_DIAGNOSES[diagnosisKey as keyof typeof MOCK_DIAGNOSES];
+      diagnosis = {
+        ...baseResult,
+        createdAt: new Date().toISOString()
+      };
     }
 
     return res.json({
