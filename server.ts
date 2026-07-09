@@ -299,6 +299,82 @@ const MOCK_DIAGNOSES = {
         ]
       }
     ]
+  },
+  nutrient_deficiency: {
+    isHealthy: false,
+    cropName: "Crop",
+    diseaseName: "Nutritional Deficiency",
+    scientificName: "Abiotic Disorder",
+    confidence: 88,
+    severity: "Moderate" as const,
+    description: "The crop foliage shows a pattern of uniform yellowing from leaf tips, green veins, or chlorosis on older leaves without spots or fungal mold. This strongly suggests a nutrient deficiency, such as nitrogen, magnesium, or iron deficiency rather than an infectious disease.",
+    symptoms: [
+      "Uniform yellowing starting from leaf tips and margins",
+      "Interveinal chlorosis (green veins with yellow leaf tissue)",
+      "Stunted leaf expansion without spots or mold",
+      "Premature leaf drop starting on older lower foliage first"
+    ],
+    treatments: [
+      {
+        category: "Immediate Actions",
+        steps: [
+          "Apply balanced organic liquid fertilizer or nitrogen-rich manure.",
+          "Test soil pH to ensure nutrients are not locked out due to high/low acidity."
+        ]
+      },
+      {
+        category: "Organic Solutions",
+        steps: [
+          "Spray Epsom salt (magnesium sulfate) solution (1-2 tbsp per gallon of water) for magnesium deficiency.",
+          "Apply well-rotted cow dung manure, vermicompost, or compost tea to enrich soil nitrogen."
+        ]
+      },
+      {
+        category: "Prevention",
+        steps: [
+          "Rotate crops with nitrogen-fixing legumes like beans or peas.",
+          "Maintain consistent watering to ensure stable nutrient uptake."
+        ]
+      }
+    ]
+  },
+  viral_disease: {
+    isHealthy: false,
+    cropName: "Crop",
+    diseaseName: "Viral Infection (Mosaic / Leaf Curl)",
+    scientificName: "Plant Virus Complex",
+    confidence: 85,
+    severity: "High" as const,
+    description: "Characterized by mosaic mottling, crinkling, yellow-green patchiness, leaf curling, or stunted growth on new shoots, with NO spots, holes, or fuzzy mold. This is caused by plant viruses often transmitted by sap-sucking pests like whiteflies or aphids.",
+    symptoms: [
+      "Mosaic-like green and yellow mottling patterns on foliage",
+      "Upward or downward leaf curling and puckered texture",
+      "Severe stunting of plant growth and distorted new shoots",
+      "No circular spots, wet lesions, or velvety mold growth"
+    ],
+    treatments: [
+      {
+        category: "Immediate Actions",
+        steps: [
+          "Immediately uproot and destroy severely infected plants to prevent virus spread. Viruses cannot be cured once inside a plant.",
+          "Control sap-sucking insect vectors like whiteflies and aphids that transmit the virus."
+        ]
+      },
+      {
+        category: "Organic Solutions",
+        steps: [
+          "Spray organic Neem oil (1-2%) or herbal insect repellents (Agnisastra) to control pest vectors.",
+          "Install yellow sticky traps in the field to capture whiteflies and leafhoppers."
+        ]
+      },
+      {
+        category: "Prevention",
+        steps: [
+          "Grow resistant crop varieties suited to your local region.",
+          "Keep the farm free of host weeds that shelter pests and viral reservoirs."
+        ]
+      }
+    ]
   }
 };
 
@@ -462,9 +538,13 @@ app.post("/api/diagnose", async (req, res) => {
       choice = "leaf_mold";
     } else if (descLower.includes("bacterial") || descLower.includes("greasy") || descLower.includes("pepper")) {
       choice = "bacterial_spot";
+    } else if (descLower.includes("nutrient") || descLower.includes("deficiency") || descLower.includes("chlorosis") || (descLower.includes("yellowing") && descLower.includes("vein"))) {
+      choice = "nutrient_deficiency";
+    } else if (descLower.includes("mosaic") || descLower.includes("mottling") || descLower.includes("curling") || descLower.includes("stunted") || descLower.includes("curl") || descLower.includes("virus")) {
+      choice = "viral_disease";
     } else if (image) {
       // If we have an image, let's randomly assign a disease for high-quality demo (excluding healthy, to make it fun, or healthy sometimes)
-      const keys = ["early_blight", "late_blight", "leaf_mold", "bacterial_spot", "healthy"];
+      const keys = ["early_blight", "late_blight", "leaf_mold", "bacterial_spot", "nutrient_deficiency", "viral_disease", "healthy"];
       // Hash the image length to make it deterministic for the same image upload
       const hashIndex = image.length % keys.length;
       choice = keys[hashIndex];
@@ -746,8 +826,8 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
     const parts: any[] = [];
 
     // Prompt instructions to guide Gemini for professional crop diagnosis
-    const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
-Your task is to diagnose plant diseases or health status from leaves, stems, or crop images, or from the farmer's written descriptions.
+    const systemPrompt = `You are AgriSense AI, an expert plant pathologist and crop specialist. 
+Your task is to diagnose plant diseases, nutritional deficiencies, or health status from leaves, stems, or crop images, or from the farmer's written descriptions.
 
 CLINICAL SYMPTOM DIAGNOSIS & GROUNDING PROCESS:
 You MUST follow a rigorous clinical reasoning process to analyze symptoms. Compare reported symptoms against exact pathological definitions to avoid confusing similar diseases:
@@ -755,10 +835,13 @@ You MUST follow a rigorous clinical reasoning process to analyze symptoms. Compa
 - LATE BLIGHT (Phytophthora infestans): Characterized by LARGE, irregular, water-soaked pale-green to dark brown/black lesions starting from leaf tips or margins, with a white, fuzzy mold growth on the undersides of the leaves in wet/humid conditions. It does NOT have small circular spots with distinct yellow halos.
 - EARLY BLIGHT (Alternaria solani): Characterized by brown-to-black spots on older leaves that enlarge and develop concentric target-like rings or bullseye patterns, surrounded by yellow halos.
 - RUST (Puccinia spp.): Characterized by raised, powdery, dusty orange-to-yellow or reddish-brown pustules on the undersides of leaves.
+- ABIOTIC NUTRITIONAL DEFICIENCY (e.g., Nitrogen or Magnesium deficiency): Characterized by uniform yellowing of leaves starting from the tips/margins, or interveinal chlorosis (veins remain green while leaf tissue turns yellow) starting on older leaves first, with ABSOLUTELY NO spots, holes, necrotic lesions, or fungal mold. If this pattern is described or shown, you MUST diagnose it as "Nutritional Deficiency" (scientific name: "Abiotic Disorder"). Do NOT diagnose it as an infectious disease like Leaf Mold or Blight.
+- VIRAL INFECTION (e.g., Mosaic Virus or Leaf Curl Complex): Characterized by mosaic-like green/yellow mottling, puckered/crinkled textures, downward or upward leaf curling, or severe stunting of growth on new shoots, with ABSOLUTELY NO spots, holes, wet lesions, or fuzzy mold. If this is described, diagnose it as "Viral Infection (Mosaic / Leaf Curl)" (scientific name: "Plant Virus Complex").
 
 STRICT SYMPTOM MATCHING RULE:
 - Do NOT jump to high-confidence conclusions (e.g. over 85% confidence) unless symptoms match a unique disease's profile perfectly.
-- If the description describes "small, water-soaked, dark brown-to-black spots often with a yellow halo around each spot", you MUST diagnose it as Bacterial Spot (Xanthomonas campestris pv. vesicatoria) or similar bacterial spots. You must NEVER diagnose it as Late Blight or Rust, which have completely different physical symptoms.
+- If the description describes "small, water-soaked, dark brown-to-black spots often with a yellow halo around each spot", you MUST diagnose it as Bacterial Spot (Xanthomonas campestris pv. vesicatoria) or similar bacterial spots. You must NEVER diagnose it as Late Blight, Leaf Mold, or Rust, which have completely different physical symptoms.
+- If the description matches a nutritional deficiency (yellowing, green veins, no spots/mold) or a viral issue (curling, mosaic, stunting, no spots/mold), you MUST classify it as Nutritional Deficiency or Viral Infection respectively, instead of forcing it into a fungal category like Leaf Mold.
 - If the farmer's description is ambiguous, too short, or lacks clear descriptors, you MUST set "isUncertain" to true, lower the confidence score (e.g. between 40-60%), and provide specific questions in "uncertaintyWarning" (translated to ${targetLanguageName}) to help the farmer clarify (e.g., "Are the spots small and flat with yellow halos, or large and greasy-looking? Is there white fuzzy mold under the leaves?").
 - If the description matches multiple potential diseases or is contradictory, set "isUncertain" to true and describe the possibilities and recommendations in "uncertaintyWarning".
 
@@ -919,12 +1002,18 @@ app.post("/api/chat", async (req, res) => {
     } else if (descLower.includes("bacterial") || descLower.includes("greasy") || descLower.includes("pepper")) {
       reply = `Small, greasy dark spots with faint yellow margins on pepper/chilli leaves point to Bacterial Spot (Xanthomonas campestris). Ensure seed treatment with hot water and avoid irrigation during wet periods.`;
       diagnosis = { ...MOCK_DIAGNOSES.bacterial_spot, createdAt: new Date().toISOString() };
+    } else if (descLower.includes("nutrient") || descLower.includes("deficiency") || descLower.includes("chlorosis") || (descLower.includes("yellowing") && descLower.includes("vein"))) {
+      reply = `This indicates an abiotic Nutritional Deficiency. Uniform yellowing starting from leaf tips and interveinal chlorosis (green veins) with no fungal spots are key characteristics. We recommend testing your soil pH and applying balanced organic manure or nitrogen-rich compost tea.`;
+      diagnosis = { ...MOCK_DIAGNOSES.nutrient_deficiency, createdAt: new Date().toISOString() };
+    } else if (descLower.includes("mosaic") || descLower.includes("mottling") || descLower.includes("curling") || descLower.includes("stunted") || descLower.includes("curl") || descLower.includes("virus")) {
+      reply = `This looks like a Viral Infection (such as Mosaic Virus or Leaf Curl Complex). Characterized by mosaic mottling, crinkled texture, leaf curling, and stunting with no mold, this is spread by pests like whiteflies. Immediately pull and destroy heavily infected plants and use organic Neem oil to control insect vectors.`;
+      diagnosis = { ...MOCK_DIAGNOSES.viral_disease, createdAt: new Date().toISOString() };
     } else if (descLower.includes("healthy") || descLower.includes("perfect") || descLower.includes("no spots")) {
       reply = `Excellent. Your foliage appears vibrant green and displays solid turgor pressure. This indicates healthy leaf status with active photosynthesis. Keep applying cow dung manure and Panchagavya for high vigor.`;
       diagnosis = { ...MOCK_DIAGNOSES.healthy, createdAt: new Date().toISOString() };
     } else {
       // General response asking for clarification
-      reply = `Greetings! I am the AgriSense AI Agronomist, based in India. Please describe your crop type (e.g. Tomato/टमाटर, Chilli/मिर्च, Paddy/धान, Cotton/कपास) and any specific foliage symptoms (such as spot colors, concentric rings, or water-soaked patches) so I can diagnose it in real-time.`;
+      reply = `Greetings! I am the AgriSense AI Agronomist, based in India. Please describe your crop type (e.g. Tomato/टमाटर, Chilli/मिर्च, Paddy/धान, Cotton/कпас) and any specific foliage symptoms (such as spot colors, concentric rings, or water-soaked patches) so I can diagnose it in real-time.`;
     }
 
     return res.json({
@@ -937,7 +1026,22 @@ app.post("/api/chat", async (req, res) => {
   // Real Gemini API call for Chat Diagnostic
   try {
     const systemPrompt = `You are AgriSense AI Agronomist, an expert plant pathologist and crop specialist. 
-Your task is to chat with the farmer, understand their plant issues, and diagnose any potential crop diseases or folier issues in real-time.
+Your task is to chat with the farmer, understand their plant issues, and diagnose any potential crop diseases, nutritional deficiencies, or folier issues in real-time.
+
+CLINICAL SYMPTOM DIAGNOSIS & GROUNDING PROCESS:
+You MUST follow a rigorous clinical reasoning process to analyze symptoms described in the chat:
+- BACTERIAL SPOT (Xanthomonas campestris pv. vesicatoria): Characterized by small, water-soaked, dark brown-to-black spots on leaves, often with a yellow halo around each spot. The spots are flat, circular or angular. As they age, they look greasy.
+- LATE BLIGHT (Phytophthora infestans): Characterized by LARGE, irregular, water-soaked pale-green to dark brown/black lesions starting from leaf tips or margins, with a white, fuzzy mold growth on the undersides of the leaves in wet/humid conditions. It does NOT have small circular spots with distinct yellow halos.
+- EARLY BLIGHT (Alternaria solani): Characterized by brown-to-black spots on older leaves that enlarge and develop concentric target-like rings or bullseye patterns, surrounded by yellow halos.
+- RUST (Puccinia spp.): Characterized by raised, powdery, dusty orange-to-yellow or reddish-brown pustules on the undersides of leaves.
+- ABIOTIC NUTRITIONAL DEFICIENCY (e.g., Nitrogen or Magnesium deficiency): Characterized by uniform yellowing of leaves starting from the tips/margins, or interveinal chlorosis (veins remain green while leaf tissue turns yellow) starting on older leaves first, with ABSOLUTELY NO spots, holes, necrotic lesions, or fungal mold. If this pattern is described, you MUST diagnose it as "Nutritional Deficiency" (scientific name: "Abiotic Disorder"). Do NOT diagnose it as an infectious disease like Leaf Mold or Blight.
+- VIRAL INFECTION (e.g., Mosaic Virus or Leaf Curl Complex): Characterized by mosaic-like green/yellow mottling, puckered/crinkled textures, downward or upward leaf curling, or severe stunting of growth on new shoots, with ABSOLUTELY NO spots, holes, wet lesions, or fuzzy mold. If this is described, diagnose it as "Viral Infection (Mosaic / Leaf Curl)" (scientific name: "Plant Virus Complex").
+
+STRICT SYMPTOM MATCHING RULE:
+- Do NOT jump to high-confidence conclusions (e.g. over 85% confidence) unless symptoms match a unique disease's profile perfectly.
+- If the description describes "small, water-soaked, dark brown-to-black spots often with a yellow halo around each spot", you MUST diagnose it as Bacterial Spot (Xanthomonas campestris pv. vesicatoria) or similar bacterial spots. You must NEVER diagnose it as Late Blight, Leaf Mold, or Rust, which have completely different physical symptoms.
+- If the description matches a nutritional deficiency (yellowing, green veins, no spots/mold) or a viral issue (curling, mosaic, stunting, no spots/mold), you MUST classify it as Nutritional Deficiency or Viral Infection respectively, instead of forcing it into a fungal category like Leaf Mold.
+- If the farmer's description is ambiguous, too short, or lacks clear descriptors, do NOT return a diagnosis; instead, set "diagnosis" to null, and in your "reply" ask specific clarifying questions to help the farmer clarify (e.g., "Are the spots small and flat with yellow halos, or large and greasy-looking? Is there white fuzzy mold under the leaves?").
 
 CRITICAL NON-AGRICULTURAL / NON-PLANT CHAT CHECK:
 If the user's message or the conversation topic is NOT related to plants, crops, farming, soil, plant diseases, gardening, or agriculture (for example, asking general questions like "who are you", "tell me a joke", or talking about coding, cars, movies, politics, or other random off-topic things), you MUST politely decline to discuss non-farming topics. Specifically, set the "diagnosis" field to null and set the "reply" field to a friendly, polite refusal in ${targetLanguageName} (e.g., "I am an AI Agronomist dedicated to helping with crops and plants. Please ask me questions related to agriculture, crops, or leaf diseases!").
@@ -963,7 +1067,7 @@ Guidelines:
 2. Ask helpful clarifying questions if you need more details to form a certain diagnosis (e.g. asking about spot colors, target-like concentric rings, humidity, crop name, leaf undersides).
 3. Be professional, friendly, and concise. Keep your text reply between 1 and 3 sentences.
 4. IMPORTANT: If the farmer has provided enough details (such as the crop name and clear visual symptoms) to identify the crop condition or disease with reasonable certainty, populate the 'diagnosis' field with a highly accurate structured analysis. Otherwise, set the 'diagnosis' field to null.
-5. If you do generate a diagnosis, ensure it matches the plant pathology schema.
+5. If you do generate a diagnosis, ensure it matches the plant pathology schema. Ensure isUncertain (boolean) is false if certain, or true if there is low confidence, and populate uncertaintyWarning (string) accordingly.
 
 Response Schema:
 You must return your output strictly in JSON format matching this schema:

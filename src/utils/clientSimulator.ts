@@ -207,6 +207,82 @@ export const LOCALIZED_MOCK_DIAGNOSES: Record<LanguageCode, Record<string, Omit<
           ]
         }
       ]
+    },
+    nutrient_deficiency: {
+      isHealthy: false,
+      cropName: "Crop",
+      diseaseName: "Nutritional Deficiency",
+      scientificName: "Abiotic Disorder",
+      confidence: 88,
+      severity: "Moderate",
+      description: "The crop foliage shows a pattern of uniform yellowing from leaf tips, green veins, or chlorosis on older leaves without spots or fungal mold. This strongly suggests a nutrient deficiency, such as nitrogen, magnesium, or iron deficiency rather than an infectious disease.",
+      symptoms: [
+        "Uniform yellowing starting from leaf tips and margins",
+        "Interveinal chlorosis (green veins with yellow leaf tissue)",
+        "Stunted leaf expansion without spots or mold",
+        "Premature leaf drop starting on older lower foliage first"
+      ],
+      treatments: [
+        {
+          category: "Immediate Actions",
+          steps: [
+            "Apply balanced organic liquid fertilizer or nitrogen-rich manure.",
+            "Test soil pH to ensure nutrients are not locked out due to high/low acidity."
+          ]
+        },
+        {
+          category: "Organic Solutions",
+          steps: [
+            "Spray Epsom salt (magnesium sulfate) solution (1-2 tbsp per gallon of water) for magnesium deficiency.",
+            "Apply well-rotted cow dung manure, vermicompost, or compost tea to enrich soil nitrogen."
+          ]
+        },
+        {
+          category: "Prevention",
+          steps: [
+            "Rotate crops with nitrogen-fixing legumes like beans or peas.",
+            "Maintain consistent watering to ensure stable nutrient uptake."
+          ]
+        }
+      ]
+    },
+    viral_disease: {
+      isHealthy: false,
+      cropName: "Crop",
+      diseaseName: "Viral Infection (Mosaic / Leaf Curl)",
+      scientificName: "Plant Virus Complex",
+      confidence: 85,
+      severity: "High",
+      description: "Characterized by mosaic mottling, crinkling, yellow-green patchiness, leaf curling, or stunted growth on new shoots, with NO spots, holes, or fuzzy mold. This is caused by plant viruses often transmitted by sap-sucking pests like whiteflies or aphids.",
+      symptoms: [
+        "Mosaic-like green and yellow mottling patterns on foliage",
+        "Upward or downward leaf curling and puckered texture",
+        "Severe stunting of plant growth and distorted new shoots",
+        "No circular spots, wet lesions, or velvety mold growth"
+      ],
+      treatments: [
+        {
+          category: "Immediate Actions",
+          steps: [
+            "Immediately uproot and destroy severely infected plants to prevent virus spread. Viruses cannot be cured once inside a plant.",
+            "Control sap-sucking insect vectors like whiteflies and aphids that transmit the virus."
+          ]
+        },
+        {
+          category: "Organic Solutions",
+          steps: [
+            "Spray organic Neem oil (1-2%) or herbal insect repellents (Agnisastra) to control pest vectors.",
+            "Install yellow sticky traps in the field to capture whiteflies and leafhoppers."
+          ]
+        },
+        {
+          category: "Prevention",
+          steps: [
+            "Grow resistant crop varieties suited to your local region.",
+            "Keep the farm free of host weeds that shelter pests and viral reservoirs."
+          ]
+        }
+      ]
     }
   },
   // Translated fallbacks for non-English to ensure full localization
@@ -338,6 +414,54 @@ export const LOCALIZED_MOCK_DIAGNOSES: Record<LanguageCode, Record<string, Omit<
           ]
         }
       ]
+    },
+    nutrient_deficiency: {
+      isHealthy: false,
+      cropName: "फसल",
+      diseaseName: "पोषक तत्वों की कमी (Nutritional Deficiency)",
+      scientificName: "Abiotic Disorder",
+      confidence: 88,
+      severity: "Moderate",
+      description: "फसल की पत्तियों में बिना किसी धब्बे या फंगस के पत्ती के सिरों से पीलापन, हरी नसें या पुरानी पत्तियों में क्लोरोसिस दिख रहा है। यह किसी संक्रामक रोग के बजाय नाइट्रोजन, मैग्नीशियम या आयरन जैसे पोषक तत्वों की कमी का संकेत देता है।",
+      symptoms: [
+        "पत्ती के सिरों और किनारों से शुरू होने वाला समान पीलापन",
+        "अंतरा-शिरा क्लोरोसिस (हरी नसें और पीले रंग के पत्ती के ऊतक)",
+        "बिना किसी धब्बे या फंगस के पत्तियों का छोटा आकार",
+        "पुरानी निचली पत्तियों से शुरू होकर समय से पहले पत्तियों का गिरना"
+      ],
+      treatments: [
+        {
+          category: "तत्काल कार्रवाई",
+          steps: [
+            "संतुलित जैविक तरल उर्वरक या नाइट्रोजन युक्त खाद का प्रयोग करें।",
+            "मिट्टी का पीएच परीक्षण करें ताकि यह सुनिश्चित हो सके कि पोषक तत्व बंद (लॉक आउट) न हों।"
+          ]
+        }
+      ]
+    },
+    viral_disease: {
+      isHealthy: false,
+      cropName: "फसल",
+      diseaseName: "विषाणु जनित रोग (Mosaic / Leaf Curl)",
+      scientificName: "Plant Virus Complex",
+      confidence: 85,
+      severity: "High",
+      description: "पत्तियों पर मोज़ेक मोज़िंग, झुर्रीदार होना, पीला-हरापन, पत्ती का मुड़ना या नए अंकुरों पर रुका हुआ विकास दिख रहा है, जिसमें कोई धब्बा, छेद या फंगस नहीं है। यह पौधों के वायरस के कारण होता है जो अक्सर सफेद मक्खी या एफिड्स जैसे कीटों द्वारा फैलते हैं।",
+      symptoms: [
+        "पत्तियों पर मोज़ेक जैसे हरे और पीले रंग के धब्बेदार पैटर्न",
+        "पत्तियों का ऊपर या नीचे की ओर मुड़ना और सिकुड़ना",
+        "पौधे के विकास का रुकना और नए अंकुरों का विकृत होना",
+        "कोई गोलाकार धब्बा, गीला घाव या मखमली फफूंद नहीं"
+      ],
+      treatments: [
+        {
+          category: "तत्काल कार्रवाई",
+          steps: [
+            "वायरस के प्रसार को रोकने के लिए तुरंत गंभीर रूप से संक्रमित पौधों को उखाड़कर नष्ट कर दें।",
+            "सफेद मक्खियों और एफिड्स जैसे रस चूसने वाले कीटों को नियंत्रित करें जो वायरस फैलाते हैं।"
+          ]
+        }
+      ]
     }
   },
   // Add other language keys returning similar structure or falling back to English/Hindi for high reliability
@@ -364,6 +488,14 @@ languages.forEach(lang => {
       ...LOCALIZED_MOCK_DIAGNOSES.en.bacterial_spot,
       diseaseName: "Bacterial Spot (बैक्टीरियल स्पॉट)"
     },
+    nutrient_deficiency: {
+      ...LOCALIZED_MOCK_DIAGNOSES.en.nutrient_deficiency,
+      diseaseName: "Nutritional Deficiency (पोषक तत्वों की कमी)"
+    },
+    viral_disease: {
+      ...LOCALIZED_MOCK_DIAGNOSES.en.viral_disease,
+      diseaseName: "Viral Infection (विषाणु जनित संक्रमण)"
+    },
     healthy: {
       ...LOCALIZED_MOCK_DIAGNOSES.en.healthy,
       diseaseName: "Healthy Foliage Status"
@@ -388,9 +520,13 @@ export function simulateClientDiagnosis(
     choice = "leaf_mold";
   } else if (descLower.includes("bacterial") || descLower.includes("greasy") || descLower.includes("pepper") || descLower.includes("तैलीय")) {
     choice = "bacterial_spot";
+  } else if (descLower.includes("nutrient") || descLower.includes("deficiency") || descLower.includes("chlorosis") || (descLower.includes("yellowing") && descLower.includes("vein")) || descLower.includes("कमी") || descLower.includes("पोषक")) {
+    choice = "nutrient_deficiency";
+  } else if (descLower.includes("mosaic") || descLower.includes("mottling") || descLower.includes("curling") || descLower.includes("stunted") || descLower.includes("curl") || descLower.includes("virus") || descLower.includes("विषाणु") || descLower.includes("मोज़ेक")) {
+    choice = "viral_disease";
   } else if (image) {
     // Pick deterministically based on base64 content length
-    const keys = ["early_blight", "late_blight", "leaf_mold", "bacterial_spot", "healthy"];
+    const keys = ["early_blight", "late_blight", "leaf_mold", "bacterial_spot", "nutrient_deficiency", "viral_disease", "healthy"];
     const hashIndex = image.length % keys.length;
     choice = keys[hashIndex];
   } else if (descLower.length > 0) {
@@ -438,6 +574,16 @@ export function simulateClientChat(
       ? "मिर्च या टमाटर की पत्तियों पर छोटे, काले चिकने या तैलीय धब्बे बैक्टीरियल स्पॉट (Bacterial Spot) के लक्षण हैं। गीली पत्तियों को छूने से बचें और तांबे वाले जैविक कवकनाशी का छिड़काव करें।"
       : `Small, greasy dark spots with faint yellow margins on pepper/chilli leaves point to Bacterial Spot (Xanthomonas campestris). Ensure seed treatment with hot water and avoid irrigation during wet periods.`;
     diagnosisKey = "bacterial_spot";
+  } else if (descLower.includes("nutrient") || descLower.includes("deficiency") || descLower.includes("chlorosis") || (descLower.includes("yellowing") && descLower.includes("vein")) || descLower.includes("कमी") || descLower.includes("पोषक")) {
+    reply = language === "hi"
+      ? "यह एक अजैविक पोषक तत्व की कमी (Nutritional Deficiency) का संकेत है। बिना किसी फंगस या धब्बे के पत्ती के सिरों से शुरू होने वाला समान पीलापन या हरी नसें इस कमी को दर्शाती हैं। कृपया संतुलित जैविक खाद, वर्मीकम्पोस्ट या नीम की खली का प्रयोग करें।"
+      : `This indicates an abiotic Nutritional Deficiency. Uniform yellowing starting from leaf tips and interveinal chlorosis (green veins) with no fungal spots are key characteristics. We recommend testing your soil pH and applying balanced organic manure or nitrogen-rich compost tea.`;
+    diagnosisKey = "nutrient_deficiency";
+  } else if (descLower.includes("mosaic") || descLower.includes("mottling") || descLower.includes("curling") || descLower.includes("stunted") || descLower.includes("curl") || descLower.includes("virus") || descLower.includes("विषाणु") || descLower.includes("मोज़ेक")) {
+    reply = language === "hi"
+      ? "यह एक विषाणु जनित रोग (Viral Infection) का संकेत है, जैसे मोज़ेक या लीफ कर्ल। यह अक्सर सफेद मक्खी या एफिड्स जैसे रस चूसने वाले कीटों द्वारा फैलता है। संक्रमित पौधों को तुरंत उखाड़ दें और कीटों को नियंत्रित करने के लिए जैविक नीम के तेल का छिड़काव करें।"
+      : `This looks like a Viral Infection (such as Mosaic Virus or Leaf Curl Complex). Characterized by mosaic mottling, crinkled texture, leaf curling, and stunting with no mold, this is spread by pests like whiteflies. Immediately pull and destroy heavily infected plants and use organic Neem oil to control insect vectors.`;
+    diagnosisKey = "viral_disease";
   } else if (descLower.includes("healthy") || descLower.includes("perfect") || descLower.includes("no spots") || descLower.includes("स्वस्थ")) {
     reply = language === "hi"
       ? "बहुत बढ़िया! आपकी फसल की पत्तियां पूरी तरह स्वस्थ, हरी और चमकदार दिख रही हैं। मिट्टी की सेहत बनाए रखने के लिए समय-समय पर वर्मीकम्पोस्ट या पंचगव्य का उपयोग जारी रखें।"
