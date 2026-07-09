@@ -1098,8 +1098,7 @@ Your task is to translate the provided structured plant diagnosis object into ex
 Translate all crop names, disease names (except scientific name which must remain exactly as it is), descriptions, symptoms, and treatment categories/steps into simple everyday ${targetLanguageName} words.
 Return the output strictly in JSON format matching the input schema exactly. Do not include markdown formatting or backticks outside the json.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response = await generateContentWithFallback(ai, {
       contents: `Please translate this diagnosis to simple farmer-friendly ${targetLanguageName}:
 ${JSON.stringify(diagnosis, null, 2)}`,
       config: {
@@ -1177,8 +1176,7 @@ app.post("/api/translate-text", async (req, res) => {
     const targetLanguageName = targetLanguage === "hi" ? "Hindi" : "English";
     const systemPrompt = `You are AgriSense AI Agronomist, translating farmer-agronomist communications into extremely simple, warm, everyday, farmer-friendly ${targetLanguageName}. Do not add any conversational padding like "Sure, here is the translation" - just output the exact translated text.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response = await generateContentWithFallback(ai, {
       contents: `Translate this text to simple ${targetLanguageName}: "${text}"`,
       config: {
         systemInstruction: systemPrompt,
