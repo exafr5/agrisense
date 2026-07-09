@@ -10,7 +10,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Body parsing with higher limits for base64 image upload
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Lazy init Gemini AI
 let aiClient: GoogleGenAI | null = null;
@@ -737,7 +738,7 @@ Return the output strictly in the requested JSON format matching the schema. Do 
                 {
                   inlineData: {
                     data: cleanBase64,
-                    mimeType: "image/jpeg"
+                    mimeType: image.match(/^data:(image\/\w+);base64,/)?.[1] || "image/jpeg"
                   }
                 },
                 {
@@ -949,7 +950,7 @@ Return the output strictly in the requested JSON format matching the schema. Do 
       const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
       parts.push({
         inlineData: {
-          mimeType: "image/jpeg",
+          mimeType: image.match(/^data:(image\/\w+);base64,/)?.[1] || "image/jpeg",
           data: cleanBase64
         }
       });

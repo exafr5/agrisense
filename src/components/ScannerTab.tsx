@@ -31,13 +31,36 @@ export default function ScannerTab({ onNewDiagnosis, offlineMode, language = "en
   // Default mockup leaf image
   const DEFAULT_LEAF_IMAGE = "https://lh3.googleusercontent.com/aida-public/AB6AXuDTLklxllDm4TixyWPAS21jubyizji3zSuIrW7MLF5O2Cb0EsiCCbJmcm0J-pj66_7sfwtw1Dq2Vj3IcLieGbeQ9obHCOgrms2r9mR0RcifyvzEXM7R8gixTAdQUNB07MSpywFHRqNDiZBEQGeNumbMhYg6NEdlYe3R_9qJepMDXS5WhKq0h00-03Gv_MQeusYKnfqBT0VHQtBnd1T97b9ygga4oxp8Q050LFKT53ufTi4L2TUhoW6ezCG11D4KCc5AugBeiJ0UHr8";
 
-  // Function to convert file to base64
+  // Function to convert file to base64 with downscaling for API safety
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_DIM = 1200;
+          let { width, height } = img;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height *= MAX_DIM / width;
+              width = MAX_DIM;
+            } else {
+              width *= MAX_DIM / height;
+              height = MAX_DIM;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", 0.8));
+        };
+        img.onerror = reject;
+        img.src = event.target?.result as string;
+      };
+      reader.onerror = reject;
       reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
     });
   };
 
