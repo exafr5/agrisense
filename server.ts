@@ -39,9 +39,6 @@ async function generateContentWithFallback(
   params: any
 ): Promise<any> {
   const modelsToTry = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
     "gemini-flash-latest"
@@ -287,6 +284,101 @@ const LANGUAGE_NAMES: Record<string, string> = {
   kn: "Kannada"
 };
 
+function getNoPlantFoundResponse(language: string): any {
+  const dictionary: Record<string, any> = {
+    en: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "No familiar object found",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "No familiar plant or leaf object could be detected in this image. Please upload a clear photo of a crop or leaf.",
+      symptoms: ["Unrecognized visual patterns"],
+      treatments: []
+    },
+    hi: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "कोई परिचित वस्तु नहीं मिली (No familiar object found)",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "इस छवि में किसी परिचित पौधे या पत्ती की पहचान नहीं की जा सकी। कृपया फसल या पत्ती की स्पष्ट फोटो अपलोड करें।",
+      symptoms: ["अपरिचित दृश्य पैटर्न"],
+      treatments: []
+    },
+    pa: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "ਕੋਈ ਜਾਣੂ ਵਸਤੂ ਨਹੀਂ ਮਿਲੀ",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "ਇਸ ਤਸਵੀਰ ਵਿੱਚ ਕੋਈ ਜਾਣੂ ਪੌਦਾ ਜਾਂ ਪੱਤਾ ਨਹੀਂ ਮਿਲਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਫਸਲ ਜਾਂ ਪੱਤੇ ਦੀ ਸਾਫ਼ ਤਸਵੀਰ ਅਪਲੋਡ ਕਰੋ।",
+      symptoms: ["ਅਣਪਛਾਤੇ ਪੈਟਰਨ"],
+      treatments: []
+    },
+    te: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "ఎలాంటి తెలిసిన వస్తువు కనుగొనబడలేదు",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "ఈ చిత్రంలో ఎటువంటి తెలిసిన మొక్క లేదా ఆకు కనుగొనబడలేదు. దయచేసి పంట లేదా ఆకు యొక్క స్పష్టమైన ఫోటోను అప్‌లోడ్ చేయండి.",
+      symptoms: ["గుర్తించబడని నమూనాలు"],
+      treatments: []
+    },
+    ta: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "அறியப்பட்ட பொருள் எதுவும் இல்லை",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "இந்த படத்தில் அறியப்பட்ட தாவரம் அல்லது இலை எதுவும் கண்டறியப்படவில்லை. தயவுசெய்து பயிர் அல்லது இலையின் தெளிவான புகைப்படத்தைப் பதிவேற்றவும்.",
+      symptoms: ["அடையாளம் காணப்படாத வடிவங்கள்"],
+      treatments: []
+    },
+    mr: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "कोणतीही ओळखीची वस्तू आढळली नाही",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "या चित्रामध्ये कोणतीही ओळखीची वनस्पती किंवा पान आढळले नाही. कृपया पीक किंवा पानाचा स्पष्ट फोटो अपलोड करा।",
+      symptoms: ["अनोळखी नमुने"],
+      treatments: []
+    },
+    bn: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "কোনো পরিচিত বস্তু পাওয়া যায়নি",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "এই ছবিতে কোনো পরিচিত উদ্ভিদ বা পাতা সনাক্ত করা যায়নি। অনুগ্রহ করে ফসল বা পাতার একটি পরিষ্কার ছবি আপলোড করুন।",
+      symptoms: ["অপরিচিত প্যাটার্ন"],
+      treatments: []
+    },
+    kn: {
+      isHealthy: true,
+      cropName: "N/A",
+      diseaseName: "ಯಾವುದೇ ಪರಿಚಿತ ವಸ್ತು ಕಂಡುಬಂದಿಲ್ಲ",
+      scientificName: "N/A",
+      confidence: 100,
+      severity: "Healthy",
+      description: "ಈ ಚಿತ್ರದಲ್ಲಿ ಯಾವುದೇ ಪರಿಚಿತ ಸಸ್ಯ ಅಥವಾ ಎಲೆ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಬೆಳೆ ಅಥವಾ ಎಲೆಯ ಸ್ಪಷ್ಟವಾದ ಫೋಟೋವನ್ನು ಅಪ್‌ಲೋಡ್ ಮಾಡಿ.",
+      symptoms: ["ಅಪರಿಚಿತ ಮಾದರಿಗಳು"],
+      treatments: []
+    }
+  };
+
+  return dictionary[language] || dictionary.en;
+}
+
 // API Endpoint for Leaf / Symptom Diagnosis
 function formatChatHistory(messages: any[]): any[] {
   if (!messages || messages.length === 0) return [];
@@ -391,6 +483,20 @@ app.post("/api/diagnose", async (req, res) => {
 
       const plantIdData = await plantIdResponse.json() as any;
       console.log("plant.id API responded successfully.");
+
+      // Check if it's not a plant
+      const isPlant = plantIdData.result?.is_plant?.binary ?? true;
+      const isPlantProb = plantIdData.result?.is_plant?.probability ?? 1.0;
+      if (!isPlant || isPlantProb < 0.4) {
+        console.log(`plant.id determined this is NOT a plant (is_plant: ${isPlant}, probability: ${isPlantProb}). Returning 'No familiar object found'.`);
+        const noPlantResult = getNoPlantFoundResponse(language);
+        return res.json({
+          ...noPlantResult,
+          createdAt: new Date().toISOString(),
+          simulated: false,
+          dataSource: "plant.id"
+        });
+      }
 
       // If Gemini is available, use it to localize and enrich the plant.id response
       if (ai) {
@@ -549,7 +655,19 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
     const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
 Your task is to diagnose plant diseases or health status from leaves, stems, or crop images, or from the farmer's written descriptions.
 
-The farmer is based in India. You must use Indian-oriented agronomy practices, organic/cultural solutions (such as Neem oil, Panchagavya, Trichoderma viride, copper oxychloride, cow dung compost, ash dusting), and crop names relevant to India.
+CRITICAL NON-PLANT CHECK:
+If the uploaded image does NOT contain a plant, leaf, crop, flower, fruit, vegetable, or agricultural tree, or if it is a random household object, a human face, an animal, a car, or anything unrelated to plants/agriculture, you MUST return the following response format (translated to ${targetLanguageName}):
+- isHealthy: true
+- cropName: "N/A"
+- diseaseName: "No familiar object found" (translate this strictly to ${targetLanguageName}, e.g. "कोई परिचित वस्तु नहीं मिली (No familiar object found)" in Hindi)
+- scientificName: "N/A"
+- confidence: 100
+- severity: "Healthy"
+- description: "No familiar plant or leaf object could be detected in this image. Please upload a clear photo of a crop or leaf." (translate this to ${targetLanguageName})
+- symptoms: ["Non-plant object detected"] (translate this to ${targetLanguageName})
+- treatments: [] (empty array)
+
+Otherwise, diagnose the plant disease. The farmer is based in India. You must use Indian-oriented agronomy practices, organic/cultural solutions (such as Neem oil, Panchagavya, Trichoderma viride, copper oxychloride, cow dung compost, ash dusting), and crop names relevant to India.
 
 CRITICAL REQUIREMENT FOR SIMPLICITY:
 - All explanations, descriptions, symptoms, and treatment steps must be written in EXTREMELY simple, plain, non-technical terms.
@@ -708,7 +826,10 @@ app.post("/api/chat", async (req, res) => {
     const systemPrompt = `You are AgriSense AI Agronomist, an expert plant pathologist and crop specialist. 
 Your task is to chat with the farmer, understand their plant issues, and diagnose any potential crop diseases or folier issues in real-time.
 
-The farmer is based in India. Use Indian-oriented agronomy practices, organic/cultural solutions (such as Neem oil, Panchagavya, Trichoderma viride, copper oxychloride, cow dung compost, wood ash dusting), and crop names relevant to the Indian subcontinent.
+CRITICAL NON-AGRICULTURAL / NON-PLANT CHAT CHECK:
+If the user's message or the conversation topic is NOT related to plants, crops, farming, soil, plant diseases, gardening, or agriculture (for example, asking general questions like "who are you", "tell me a joke", or talking about coding, cars, movies, politics, or other random off-topic things), you MUST politely decline to discuss non-farming topics. Specifically, set the "diagnosis" field to null and set the "reply" field to a friendly, polite refusal in ${targetLanguageName} (e.g., "I am an AI Agronomist dedicated to helping with crops and plants. Please ask me questions related to agriculture, crops, or leaf diseases!").
+
+Otherwise, help the farmer with their agricultural issue. The farmer is based in India. Use Indian-oriented agronomy practices, organic/cultural solutions (such as Neem oil, Panchagavya, Trichoderma viride, copper oxychloride, cow dung compost, wood ash dusting), and crop names relevant to the Indian subcontinent.
 
 CRITICAL REQUIREMENT FOR SIMPLICITY:
 - All explanations, conversations, descriptions, symptoms, and treatment steps must be written in EXTREMELY simple, plain, non-technical terms.
