@@ -307,6 +307,19 @@ export default function DiseaseModal({ disease, onClose }: DiseaseModalProps) {
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           
+          {/* Uncertainty Warning Banner */}
+          {(activeDisease as any).isUncertain && (
+            <div className="bg-amber-50 border-2 border-dashed border-amber-200 rounded-xl p-4 flex items-start gap-3 text-amber-950 shadow-sm">
+              <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={20} />
+              <div>
+                <h5 className="font-bold text-sm">Low Confidence / Diagnosis Uncertainty (कम विश्वास रिपोर्ट)</h5>
+                <p className="text-xs mt-1 leading-relaxed font-semibold text-amber-900">
+                  {(activeDisease as any).uncertaintyWarning || "The diagnostic features detected are somewhat ambiguous. Please verify symptoms against other healthy leaves or consult a local agricultural officer."}
+                </p>
+              </div>
+            </div>
+          )}
+          
           {/* Friendly Guidance Banner in Simple Mode */}
           {resultMode === "simple" ? (
             <div className="bg-emerald-50/40 border border-emerald-100/80 rounded-xl p-3.5 flex items-start gap-3">

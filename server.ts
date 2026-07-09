@@ -481,6 +481,8 @@ app.post("/api/diagnose", async (req, res) => {
     // Add timestamp and a small simulation disclaimer
     return res.json({
       ...matchedResult,
+      isUncertain: false,
+      uncertaintyWarning: "",
       createdAt: new Date().toISOString(),
       simulated: true,
       description: matchedResult.description + ` (Simulated analysis in ${targetLanguageName} based on local Indian agricultural database)`
@@ -544,7 +546,15 @@ app.post("/api/diagnose", async (req, res) => {
         try {
           console.log("Enriching plant.id results using Gemini AI for language localization and validation...");
           const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
-Your task is to translate, format, and strictly validate the provided raw plant.id diagnosis data into ${targetLanguageName} matching our response schema.
+Your task is to translate, format, and strictly enrich the provided raw plant.id diagnosis data into ${targetLanguageName} matching our response schema.
+
+STRICT GROUNDING RULE:
+- You MUST base your diagnosis (diseaseName, scientificName, and whether isHealthy is true/false) strictly and exclusively on the top disease suggestion provided in the raw plant.id JSON: "plantIdData.result.disease.suggestions[0]".
+- You are FORBIDDEN from inventing, hallucinating, or diagnosing a different disease (such as "Rust" with raised dusty orange pustules when the plant.id output specifies "Bacterial spot" caused by Xanthomonas campestris pv. vesicatoria). You must be a faithful translator and enricher of the plant.id result.
+- The "cropName" should match the top plant classification suggestion: "plantIdData.result.classification.suggestions[0].name" (translated into ${targetLanguageName}, e.g. "टमाटर" for Tomato if Hindi).
+- Set "isHealthy" to true only if the plant.id "is_healthy" assessment is positive (or if there are no disease suggestions with a probability >= 0.20). Otherwise, set "isHealthy" to false and diagnose the top disease suggestion from plant.id.
+- The "confidence" score should be directly derived from the top disease suggestion's probability (multiplied by 100 to get a percentage, e.g. 0.82 becomes 82) or the top plant classification probability.
+- If the confidence score is low (under 60%) or if the top plant.id suggestion has low probability (under 0.35), you MUST set "isUncertain" to true, and provide a clear, helpful warning in "uncertaintyWarning" (translated into ${targetLanguageName}) explaining that the scan confidence is low and suggesting the farmer upload a clearer, well-lit close-up of a single leaf under natural light. Otherwise, set "isUncertain" to false and "uncertaintyWarning" to "".
 
 CRITICAL NON-PLANT CHECK:
 You must look at BOTH the uploaded image and the raw plant.id JSON.
@@ -555,6 +565,8 @@ If the uploaded image does NOT contain a plant, leaf, crop, flower, fruit, veget
 - scientificName: "N/A"
 - confidence: 100
 - severity: "Healthy"
+- isUncertain: false
+- uncertaintyWarning: ""
 - description: "No familiar plant or leaf object could be detected in this image. Please upload a clear photo of a crop or leaf." (translate this to ${targetLanguageName})
 - symptoms: ["Non-plant object detected"] (translate this to ${targetLanguageName})
 - treatments: [] (empty array)
@@ -589,6 +601,8 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
 - scientificName: scientific name of the crop or pathogen (Latin, e.g., Solanum lycopersicum)
 - confidence: number between 0 and 100
 - severity: "High", "Moderate", "Low", or "Healthy"
+- isUncertain: boolean (true if scan probability/confidence is low or ambiguous)
+- uncertaintyWarning: string (clear advice for the farmer if isUncertain is true, otherwise empty "")
 - description: a localized 2-3 sentence overview of this crop condition
 - symptoms: array of 3-5 localized symptoms
 - treatments: array of localized treatment objects, each having { category: string, steps: string[] } (using organic/Indian practices where applicable)`
@@ -607,6 +621,8 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
                   scientificName: { type: Type.STRING },
                   confidence: { type: Type.NUMBER },
                   severity: { type: Type.STRING },
+                  isUncertain: { type: Type.BOOLEAN },
+                  uncertaintyWarning: { type: Type.STRING },
                   description: { type: Type.STRING },
                   symptoms: {
                     type: Type.ARRAY,
@@ -634,6 +650,8 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
                   "scientificName",
                   "confidence",
                   "severity",
+                  "isUncertain",
+                  "uncertaintyWarning",
                   "description",
                   "symptoms",
                   "treatments"
@@ -667,6 +685,10 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
       const scientificName = isHealthy ? (fallbackClassification?.name ?? "N/A") : (disease?.name ?? "N/A");
       const confidence = Math.round((isHealthy ? (fallbackClassification?.probability ?? 0.9) : (disease?.probability ?? 0.8)) * 100);
       const severity = isHealthy ? "Healthy" : "Moderate";
+      const isUncertain = confidence < 60;
+      const uncertaintyWarning = isUncertain 
+        ? "The scan confidence is low. Please make sure the photo is close-up, well-lit, and focused on a single leaf with visible symptoms." 
+        : "";
       const description = isHealthy 
         ? "The crop foliage appears vigorous and healthy with active photosynthesis." 
         : (disease?.details?.description ?? "A disease has been detected affecting the crop leaves and vascular systems.");
@@ -704,6 +726,8 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
         scientificName,
         confidence,
         severity,
+        isUncertain,
+        uncertaintyWarning,
         description,
         symptoms,
         treatments,
@@ -725,6 +749,19 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
     const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
 Your task is to diagnose plant diseases or health status from leaves, stems, or crop images, or from the farmer's written descriptions.
 
+CLINICAL SYMPTOM DIAGNOSIS & GROUNDING PROCESS:
+You MUST follow a rigorous clinical reasoning process to analyze symptoms. Compare reported symptoms against exact pathological definitions to avoid confusing similar diseases:
+- BACTERIAL SPOT (Xanthomonas campestris pv. vesicatoria): Characterized by small, water-soaked, dark brown-to-black spots on leaves, often with a yellow halo around each spot. The spots are flat, circular or angular. As they age, they look greasy.
+- LATE BLIGHT (Phytophthora infestans): Characterized by LARGE, irregular, water-soaked pale-green to dark brown/black lesions starting from leaf tips or margins, with a white, fuzzy mold growth on the undersides of the leaves in wet/humid conditions. It does NOT have small circular spots with distinct yellow halos.
+- EARLY BLIGHT (Alternaria solani): Characterized by brown-to-black spots on older leaves that enlarge and develop concentric target-like rings or bullseye patterns, surrounded by yellow halos.
+- RUST (Puccinia spp.): Characterized by raised, powdery, dusty orange-to-yellow or reddish-brown pustules on the undersides of leaves.
+
+STRICT SYMPTOM MATCHING RULE:
+- Do NOT jump to high-confidence conclusions (e.g. over 85% confidence) unless symptoms match a unique disease's profile perfectly.
+- If the description describes "small, water-soaked, dark brown-to-black spots often with a yellow halo around each spot", you MUST diagnose it as Bacterial Spot (Xanthomonas campestris pv. vesicatoria) or similar bacterial spots. You must NEVER diagnose it as Late Blight or Rust, which have completely different physical symptoms.
+- If the farmer's description is ambiguous, too short, or lacks clear descriptors, you MUST set "isUncertain" to true, lower the confidence score (e.g. between 40-60%), and provide specific questions in "uncertaintyWarning" (translated to ${targetLanguageName}) to help the farmer clarify (e.g., "Are the spots small and flat with yellow halos, or large and greasy-looking? Is there white fuzzy mold under the leaves?").
+- If the description matches multiple potential diseases or is contradictory, set "isUncertain" to true and describe the possibilities and recommendations in "uncertaintyWarning".
+
 CRITICAL NON-PLANT CHECK:
 If the uploaded image does NOT contain a plant, leaf, crop, flower, fruit, vegetable, or agricultural tree, or if it is a random household object, a human face, an animal, a car, or anything unrelated to plants/agriculture, you MUST return the following response format (translated to ${targetLanguageName}):
 - isHealthy: true
@@ -733,6 +770,8 @@ If the uploaded image does NOT contain a plant, leaf, crop, flower, fruit, veget
 - scientificName: "N/A"
 - confidence: 100
 - severity: "Healthy"
+- isUncertain: false
+- uncertaintyWarning: ""
 - description: "No familiar plant or leaf object could be detected in this image. Please upload a clear photo of a crop or leaf." (translate this to ${targetLanguageName})
 - symptoms: ["Non-plant object detected"] (translate this to ${targetLanguageName})
 - treatments: [] (empty array)
@@ -787,6 +826,8 @@ Return the output strictly in the requested JSON format matching the schema. Do 
             scientificName: { type: Type.STRING, description: "The scientific name of the disease pathogen (e.g. Phytophthora infestans) or 'N/A' if healthy" },
             confidence: { type: Type.NUMBER, description: "A confidence score between 0 and 100 representing certainty" },
             severity: { type: Type.STRING, description: "The severity rating: 'High', 'Moderate', 'Low', or 'Healthy'" },
+            isUncertain: { type: Type.BOOLEAN, description: "True if symptoms are ambiguous, mismatch the image/description, or match multiple potential diseases" },
+            uncertaintyWarning: { type: Type.STRING, description: "A friendly, helpful warning explaining the ambiguity and what the farmer should do or check" },
             description: { type: Type.STRING, description: `A 2-3 sentence overview in ${targetLanguageName} describing the disease, its characteristics, and how it damages the crop` },
             symptoms: {
               type: Type.ARRAY,
@@ -817,6 +858,8 @@ Return the output strictly in the requested JSON format matching the schema. Do 
             "scientificName",
             "confidence",
             "severity",
+            "isUncertain",
+            "uncertaintyWarning",
             "description",
             "symptoms",
             "treatments"

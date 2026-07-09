@@ -315,7 +315,7 @@ export default function App() {
             <Sprout size={14} /> AgriSense Core
           </p>
           <p className="opacity-70 font-medium">© 2026 AgriSense. {t.groundedInScience}.</p>
-          <p className="text-[10px] opacity-60 hover:opacity-100 transition-opacity">
+          <p className="text-[9px] tracking-widest uppercase font-mono opacity-25 hover:opacity-90 transition-opacity select-none duration-300 mt-1 block">
             <a 
               href="https://guns.lol/rizzinaxe" 
               target="_blank" 
