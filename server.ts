@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
 
 // Body parsing with higher limits for base64 image upload
 app.use(express.json({ limit: "50mb" }));
@@ -561,8 +561,15 @@ app.post("/api/diagnose", async (req, res) => {
   const targetLanguageName = LANGUAGE_NAMES[language as string] || "English";
 
   const ai = getAiClient();
-  const plantIdApiKey = process.env.PLANT_ID_API_KEY;
-  const isPlantIdActive = !!(plantIdApiKey && plantIdApiKey !== "MY_PLANT_ID_API_KEY" && image);
+  const plantIdKeysToTry = [
+    process.env.PLANT_ID_API_KEY,
+    process.env.PLANT_ID_API_KEY_2,
+    process.env.PLANT_ID_API_KEY_3,
+    "PNjh33DeyoSKH04gt0L5IgamUKNQfPrFUoLaqayRx8lHGgSfrX",
+    "5ZY6ELoBaxp23LWO2pWioz0a990N86xKVwzsHrHnxgoLYOkuCz"
+  ].filter((key): key is string => !!(key && key !== "MY_PLANT_ID_API_KEY" && key !== ""));
+
+  const isPlantIdActive = !!(plantIdKeysToTry.length > 0 && image);
 
   // Fallback to simulated if offlineSimulated or if we have no active APIs
   if (offlineSimulated || (!ai && !isPlantIdActive)) {
@@ -640,63 +647,65 @@ app.post("/api/diagnose", async (req, res) => {
     });
   }
 
-  // Real plant.id (photo.id) API Integration if API key is provided and we have an image
+  // Real plant.id (photo.id) API Integration if API keys are available and we have an image
   if (isPlantIdActive && !offlineSimulated) {
-    try {
-      console.log("Calling plant.id (photo.id) API for professional plant disease diagnostics...");
-      const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
-      
-      const plantIdResponse = await fetch("https://api.plant.id/v3/identification", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Api-Key": plantIdApiKey
-        },
-        body: JSON.stringify({
-          images: [cleanBase64],
-          health: "all",
-          similar_images: true
-        })
-      });
-
-      if (!plantIdResponse.ok) {
-        throw new Error(`plant.id API returned status ${plantIdResponse.status}`);
-      }
-
-      const plantIdData = await plantIdResponse.json() as any;
-      console.log("plant.id API responded successfully.");
-
-      // Check if it's not a plant
-      let isPlant = true;
-      let isPlantProb = 1.0;
-      if (typeof plantIdData.result?.is_plant === "boolean") {
-        isPlant = plantIdData.result.is_plant;
-      } else if (plantIdData.result?.is_plant && typeof plantIdData.result.is_plant === "object") {
-        isPlant = plantIdData.result.is_plant.binary ?? true;
-        isPlantProb = plantIdData.result.is_plant.probability ?? 1.0;
-      }
-
-      const classification = plantIdData.result?.classification?.suggestions?.[0];
-      const classProb = classification?.probability ?? 1.0;
-
-      console.log(`Diagnostic plant.id verification check: isPlant=${isPlant}, isPlantProb=${isPlantProb}, classProb=${classProb}`);
-
-      if (!isPlant || isPlantProb < 0.45 || !classification || classProb < 0.15) {
-        console.log(`plant.id determined this is NOT a plant (is_plant: ${isPlant}, probability: ${isPlantProb}, suggestion probability: ${classProb}). Returning 'No familiar object found'.`);
-        const noPlantResult = getNoPlantFoundResponse(language);
-        return res.json({
-          ...noPlantResult,
-          createdAt: new Date().toISOString(),
-          simulated: false,
-          dataSource: "plant.id"
+    let lastPlantIdError: any = null;
+    for (const key of plantIdKeysToTry) {
+      try {
+        console.log(`Calling plant.id (photo.id) API with key ending in "...${key.slice(-6)}"...`);
+        const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
+        
+        const plantIdResponse = await fetch("https://api.plant.id/v3/identification", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Api-Key": key
+          },
+          body: JSON.stringify({
+            images: [cleanBase64],
+            health: "all",
+            similar_images: true
+          })
         });
-      }
 
-      // If Gemini is available, use it to localize and enrich the plant.id response
-      if (ai) {
-        try {
-          console.log("Enriching plant.id results using Gemini AI for language localization and validation...");
-          const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
+        if (!plantIdResponse.ok) {
+          throw new Error(`plant.id API returned status ${plantIdResponse.status}`);
+        }
+
+        const plantIdData = await plantIdResponse.json() as any;
+        console.log("plant.id API responded successfully.");
+
+        // Check if it's not a plant
+        let isPlant = true;
+        let isPlantProb = 1.0;
+        if (typeof plantIdData.result?.is_plant === "boolean") {
+          isPlant = plantIdData.result.is_plant;
+        } else if (plantIdData.result?.is_plant && typeof plantIdData.result.is_plant === "object") {
+          isPlant = plantIdData.result.is_plant.binary ?? true;
+          isPlantProb = plantIdData.result.is_plant.probability ?? 1.0;
+        }
+
+        const classification = plantIdData.result?.classification?.suggestions?.[0];
+        const classProb = classification?.probability ?? 1.0;
+
+        console.log(`Diagnostic plant.id verification check: isPlant=${isPlant}, isPlantProb=${isPlantProb}, classProb=${classProb}`);
+
+        if (!isPlant || isPlantProb < 0.45 || !classification || classProb < 0.15) {
+          console.log(`plant.id determined this is NOT a plant (is_plant: ${isPlant}, probability: ${isPlantProb}, suggestion probability: ${classProb}). Returning 'No familiar object found'.`);
+          const noPlantResult = getNoPlantFoundResponse(language);
+          return res.json({
+            ...noPlantResult,
+            createdAt: new Date().toISOString(),
+            simulated: false,
+            dataSource: "plant.id"
+          });
+        }
+
+        // If Gemini is available, use it to localize and enrich the plant.id response
+        if (ai) {
+          try {
+            console.log("Enriching plant.id results using Gemini AI for language localization and validation...");
+            const systemPrompt = `You are AgriSense AI, an expert agricultural pathologist and crop specialist. 
 Your task is to translate, format, and strictly enrich the provided raw plant.id diagnosis data into ${targetLanguageName} matching our response schema.
 
 STRICT GROUNDING RULE:
@@ -732,17 +741,17 @@ CRITICAL REQUIREMENT FOR SIMPLICITY:
 
 Return the output strictly in the requested JSON format matching the schema. Do not include markdown formatting or backticks.`;
 
-          const response = await generateContentWithFallback(ai, {
-            contents: {
-              parts: [
-                {
-                  inlineData: {
-                    data: cleanBase64,
-                    mimeType: image.match(/^data:(image\/\w+);base64,/)?.[1] || "image/jpeg"
-                  }
-                },
-                {
-                  text: `Here is the raw plant.id (photo.id) API output for a crop leaf scan:
+            const response = await generateContentWithFallback(ai, {
+              contents: {
+                parts: [
+                  {
+                    inlineData: {
+                      data: cleanBase64,
+                      mimeType: image.match(/^data:(image\/\w+);base64,/)?.[1] || "image/jpeg"
+                    }
+                  },
+                  {
+                    text: `Here is the raw plant.id (photo.id) API output for a crop leaf scan:
 ${JSON.stringify(plantIdData, null, 2)}
 
 Please convert this into a single localized DiagnosisResult JSON conforming to this schema:
@@ -757,139 +766,142 @@ Please convert this into a single localized DiagnosisResult JSON conforming to t
 - description: a localized 2-3 sentence overview of this crop condition
 - symptoms: array of 3-5 localized symptoms
 - treatments: array of localized treatment objects, each having { category: string, steps: string[] } (using organic/Indian practices where applicable)`
-                }
-              ]
-            },
-            config: {
-              systemInstruction: systemPrompt,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  isHealthy: { type: Type.BOOLEAN },
-                  cropName: { type: Type.STRING },
-                  diseaseName: { type: Type.STRING },
-                  scientificName: { type: Type.STRING },
-                  confidence: { type: Type.NUMBER },
-                  severity: { type: Type.STRING },
-                  isUncertain: { type: Type.BOOLEAN },
-                  uncertaintyWarning: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  symptoms: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  },
-                  treatments: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        category: { type: Type.STRING },
-                        steps: {
-                          type: Type.ARRAY,
-                          items: { type: Type.STRING }
-                        }
-                      },
-                      required: ["category", "steps"]
-                    }
                   }
-                },
-                required: [
-                  "isHealthy",
-                  "cropName",
-                  "diseaseName",
-                  "scientificName",
-                  "confidence",
-                  "severity",
-                  "isUncertain",
-                  "uncertaintyWarning",
-                  "description",
-                  "symptoms",
-                  "treatments"
                 ]
+              },
+              config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    isHealthy: { type: Type.BOOLEAN },
+                    cropName: { type: Type.STRING },
+                    diseaseName: { type: Type.STRING },
+                    scientificName: { type: Type.STRING },
+                    confidence: { type: Type.NUMBER },
+                    severity: { type: Type.STRING },
+                    isUncertain: { type: Type.BOOLEAN },
+                    uncertaintyWarning: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    symptoms: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING }
+                    },
+                    treatments: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          category: { type: Type.STRING },
+                          steps: {
+                            type: Type.ARRAY,
+                            items: { type: Type.STRING }
+                          }
+                        },
+                        required: ["category", "steps"]
+                      }
+                    }
+                  },
+                  required: [
+                    "isHealthy",
+                    "cropName",
+                    "diseaseName",
+                    "scientificName",
+                    "confidence",
+                    "severity",
+                    "isUncertain",
+                    "uncertaintyWarning",
+                    "description",
+                    "symptoms",
+                    "treatments"
+                  ]
+                }
               }
-            }
-          });
-
-          const text = response.text;
-          if (text) {
-            const result = JSON.parse(cleanJsonText(text));
-            return res.json({
-              ...result,
-              createdAt: new Date().toISOString(),
-              simulated: false,
-              dataSource: "plant.id + Gemini"
             });
+
+            const text = response.text;
+            if (text) {
+              const result = JSON.parse(cleanJsonText(text));
+              return res.json({
+                ...result,
+                createdAt: new Date().toISOString(),
+                simulated: false,
+                dataSource: "plant.id + Gemini"
+              });
+            }
+          } catch (enrichError: any) {
+            console.warn("Gemini enrichment failed (potentially due to restricted/blocked API key). Falling back to direct plant.id parser:", enrichError?.message || enrichError);
           }
-        } catch (enrichError: any) {
-          console.warn("Gemini enrichment failed (potentially due to restricted/blocked API key). Falling back to direct plant.id parser:", enrichError?.message || enrichError);
         }
-      }
 
-      // Fallback manual extraction if Gemini is not available or failed to enrich
-      const fallbackClassification = plantIdData.result?.classification?.suggestions?.[0];
-      const disease = plantIdData.result?.disease?.suggestions?.[0];
-      
-      const isHealthy = plantIdData.result?.is_healthy?.binary ?? (!disease || disease.probability < 0.2);
-      const cropName = fallbackClassification?.name ?? "Crop";
-      const diseaseName = isHealthy ? "Healthy Foliage Status" : (disease?.common_names?.[0] ?? disease?.name ?? "Unknown disease");
-      const scientificName = isHealthy ? (fallbackClassification?.name ?? "N/A") : (disease?.name ?? "N/A");
-      const confidence = Math.round((isHealthy ? (fallbackClassification?.probability ?? 0.9) : (disease?.probability ?? 0.8)) * 100);
-      const severity = isHealthy ? "Healthy" : "Moderate";
-      const isUncertain = confidence < 60;
-      const uncertaintyWarning = isUncertain 
-        ? "The scan confidence is low. Please make sure the photo is close-up, well-lit, and focused on a single leaf with visible symptoms." 
-        : "";
-      const description = isHealthy 
-        ? "The crop foliage appears vigorous and healthy with active photosynthesis." 
-        : (disease?.details?.description ?? "A disease has been detected affecting the crop leaves and vascular systems.");
-      
-      const symptoms = isHealthy 
-        ? ["Vibrant green coloration", "Active turgor pressure", "No visible necrotic spots"]
-        : ["Leaf discoloration or necrotic lesions", "Foliage spotting", "Potential wilting or tissue damage"];
+        // Fallback manual extraction if Gemini is not available or failed to enrich
+        const fallbackClassification = plantIdData.result?.classification?.suggestions?.[0];
+        const disease = plantIdData.result?.disease?.suggestions?.[0];
+        
+        const isHealthy = plantIdData.result?.is_healthy?.binary ?? (!disease || disease.probability < 0.2);
+        const cropName = fallbackClassification?.name ?? "Crop";
+        const diseaseName = isHealthy ? "Healthy Foliage Status" : (disease?.common_names?.[0] ?? disease?.name ?? "Unknown disease");
+        const scientificName = isHealthy ? (fallbackClassification?.name ?? "N/A") : (disease?.name ?? "N/A");
+        const confidence = Math.round((isHealthy ? (fallbackClassification?.probability ?? 0.9) : (disease?.probability ?? 0.8)) * 100);
+        const severity = isHealthy ? "Healthy" : "Moderate";
+        const isUncertain = confidence < 60;
+        const uncertaintyWarning = isUncertain 
+          ? "The scan confidence is low. Please make sure the photo is close-up, well-lit, and focused on a single leaf with visible symptoms." 
+          : "";
+        const description = isHealthy 
+          ? "The crop foliage appears vigorous and healthy with active photosynthesis." 
+          : (disease?.details?.description ?? "A disease has been detected affecting the crop leaves and vascular systems.");
+        
+        const symptoms = isHealthy 
+          ? ["Vibrant green coloration", "Active turgor pressure", "No visible necrotic spots"]
+          : ["Leaf discoloration or necrotic lesions", "Foliage spotting", "Potential wilting or tissue damage"];
 
-      const treatments: any[] = [];
-      if (disease?.details?.treatment?.biological) {
-        treatments.push({
-          category: "Organic Solutions",
-          steps: disease.details.treatment.biological
+        const treatments: any[] = [];
+        if (disease?.details?.treatment?.biological) {
+          treatments.push({
+            category: "Organic Solutions",
+            steps: disease.details.treatment.biological
+          });
+        }
+        if (disease?.details?.treatment?.prevention) {
+          treatments.push({
+            category: "Prevention",
+            steps: disease.details.treatment.prevention
+          });
+        }
+        if (treatments.length === 0) {
+          treatments.push({
+            category: "Recommended Practices",
+            steps: isHealthy 
+              ? ["Continue monitoring regularly", "Ensure optimal hydration and organic cow compost application"]
+              : ["Prune and destroy infected leaves immediately", "Avoid overhead watering to restrict spore spread"]
+          });
+        }
+
+        return res.json({
+          isHealthy,
+          cropName,
+          diseaseName,
+          scientificName,
+          confidence,
+          severity,
+          isUncertain,
+          uncertaintyWarning,
+          description,
+          symptoms,
+          treatments,
+          createdAt: new Date().toISOString(),
+          simulated: false,
+          dataSource: "plant.id"
         });
-      }
-      if (disease?.details?.treatment?.prevention) {
-        treatments.push({
-          category: "Prevention",
-          steps: disease.details.treatment.prevention
-        });
-      }
-      if (treatments.length === 0) {
-        treatments.push({
-          category: "Recommended Practices",
-          steps: isHealthy 
-            ? ["Continue monitoring regularly", "Ensure optimal hydration and organic cow compost application"]
-            : ["Prune and destroy infected leaves immediately", "Avoid overhead watering to restrict spore spread"]
-        });
-      }
 
-      return res.json({
-        isHealthy,
-        cropName,
-        diseaseName,
-        scientificName,
-        confidence,
-        severity,
-        isUncertain,
-        uncertaintyWarning,
-        description,
-        symptoms,
-        treatments,
-        createdAt: new Date().toISOString(),
-        simulated: false,
-        dataSource: "plant.id"
-      });
-
-    } catch (err: any) {
-      console.error("plant.id API Error, falling back to standard Gemini API:", err);
+      } catch (err: any) {
+        console.warn(`plant.id API key failed:`, err?.message || err);
+        lastPlantIdError = err;
+      }
     }
+    console.error("All plant.id API keys failed, falling back to standard Gemini API diagnostics:", lastPlantIdError);
   }
 
   // Real Gemini API Call!
